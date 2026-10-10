@@ -447,10 +447,10 @@ private final class GiftViewSheetContent: CombinedComponent {
             }
             
             if dismiss {
-                self.dismiss(animated: true)
-                Queue.mainQueue().after(0.4, {
-                    action()
-                })
+                // Push only after the sheet has actually completed its
+                // dismissal. A fixed delay races interactive/system sheet
+                // transitions and can leave the user on the gift screen.
+                self.dismiss(animated: true, completion: action)
             } else {
                 action()
             }
@@ -1084,11 +1084,9 @@ private final class GiftViewSheetContent: CombinedComponent {
                     })
                 }
             }
-            self.dismiss(animated: true)
-                
-            Queue.mainQueue().after(0.4) {
+            self.dismiss(animated: true, completion: {
                 navigationController.pushViewController(peerController)
-            }
+            })
         }
         
         func presentActionLockedForHostedGift(gift: StarGift.UniqueGift) {
@@ -1660,9 +1658,6 @@ private final class GiftViewSheetContent: CombinedComponent {
                                 return
                             }
                             self.openPeer(peer, gifts: true)
-                            Queue.mainQueue().after(0.6) {
-                                controller.dismiss(animated: false, completion: nil)
-                            }
                         })
                     })))
                 }
@@ -1672,7 +1667,7 @@ private final class GiftViewSheetContent: CombinedComponent {
             })
         }
         
-        func dismiss(animated: Bool) {
+        func dismiss(animated: Bool, completion: (() -> Void)? = nil) {
             guard let controller = self.getController() as? GiftViewScreen else {
                 return
             }
@@ -1681,10 +1676,10 @@ private final class GiftViewSheetContent: CombinedComponent {
                 controller.dismissBalanceOverlay()
                 controller.requestLayout(forceUpdate: true, transition: .easeInOut(duration: 0.3).withUserData(ViewControllerComponentContainer.AnimateOutTransition()))
                 self.animateOut.invoke(Action { [weak controller] _ in
-                    controller?.dismiss(completion: nil)
+                    controller?.dismiss(completion: completion)
                 })
             } else {
-                controller.dismiss(animated: false)
+                controller.dismiss(animated: false, completion: completion)
             }
         }
         
