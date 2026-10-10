@@ -123,6 +123,31 @@ private func miraFakeMessageMedia(record: FakeMessageRecord) -> [Media] {
     return [media]
 }
 
+/// Produces the text stored in the local Postbox projection.  Paid fake
+/// messages need a useful chat-list preview as well as an in-chat label; the
+/// metadata lives in the local record, so deriving it here keeps all creation
+/// and edit paths consistent.
+private func miraFakeMessageDisplayText(record: FakeMessageRecord, text: String, localMedia: [Media]) -> String {
+    if record.kind == .stars {
+        let amount = max(0, record.media?.stars ?? 0)
+        let count = max(0, record.media?.starCount ?? 0)
+        let prefix: String
+        if record.outgoing {
+            prefix = amount == 0 ? "Paid message" : "Paid message · \(amount) Stars"
+        } else {
+            prefix = amount == 0 ? "Received Stars" : "Received \(amount) Stars"
+        }
+        let suffix = count > 1 ? " × \(count)" : ""
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return body.isEmpty ? prefix + suffix : "\(prefix)\(suffix)\n\(body)"
+    }
+    if record.kind != .text && localMedia.isEmpty {
+        let label = "[\(record.kind.rawValue.capitalized)]"
+        return text.isEmpty ? label : "\(label) \(text)"
+    }
+    return text
+}
+
 public final class TelegramGlobalPostSearchState: Codable, Equatable {
     public let totalFreeSearches: Int32
     public let remainingFreeSearches: Int32
@@ -398,13 +423,7 @@ public extension TelegramEngine {
                     }
                     let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName, kind: entry.kind, media: descriptor)
                     let localMedia = miraFakeMessageMedia(record: record)
-                    let displayText: String
-                    if entry.kind != .text && localMedia.isEmpty {
-                        let label = "[\(entry.kind.rawValue.capitalized)]"
-                        displayText = entry.text.isEmpty ? label : "\(label) \(entry.text)"
-                    } else {
-                        displayText = entry.text
-                    }
+                    let displayText = miraFakeMessageDisplayText(record: record, text: entry.text, localMedia: localMedia)
                     var flags = StoreMessageFlags()
                     if !outgoing {
                         flags.insert(.Incoming)
@@ -575,13 +594,16 @@ public extension TelegramEngine {
         /// Updates one local fake message in place. The local namespace and
         /// stable id are deliberately preserved so history views do not lose
         /// their anchor when the editor changes text or timestamp.
-        public func miraUpdateFakeMessage(id: String, text: String, date: Int32, kind: FakeMessageKind? = nil, media: FakeMessageMedia? = nil) -> Signal<Void, NoError> {
+        public func miraUpdateFakeMessage(id: String, text: String, date: Int32, kind: FakeMessageKind? = nil, media: FakeMessageMedia? = nil) -> Signal<Bool, NoError> {
             let account = self.account
             guard let existing = account.miraMessageHistoryStore.fakeMessage(id: id),
                   existing.messageId != 0,
                   existing.messageNamespace == Namespaces.Message.Local,
                   let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: existing.messagePeerId) else {
-                return .complete()
+                return .single(false)
+            }
+            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly else {
+                return .single(false)
             }
             let messageId = MessageId(peerId: peerId, namespace: existing.messageNamespace, id: existing.messageId)
             var prospective = existing
@@ -595,11 +617,11 @@ public extension TelegramEngine {
             let newStars = prospective.kind == .stars ? max(0, prospective.media?.stars ?? 0) : 0
             if existing.outgoing, newStars > oldStars,
                !account.miraFakeStarsLedger.canDebit(newStars - oldStars) {
-                return .complete()
+                return .single(false)
             }
-            return account.postbox.transaction { transaction -> Void in
+            return account.postbox.transaction { transaction -> Bool in
                 guard let currentMessage = transaction.getMessage(messageId) else {
-                    return
+                    return false
                 }
                 var updated = existing
                 updated.text = text
@@ -609,16 +631,13 @@ public extension TelegramEngine {
                     updated.media = kind == .text ? nil : media?.normalized
                 }
                 let localMedia = miraFakeMessageMedia(record: updated)
-                let displayText: String
-                if updated.kind != .text && localMedia.isEmpty {
-                    let label = "[\(updated.kind.rawValue.capitalized)]"
-                    displayText = text.isEmpty ? label : "\(label) \(text)"
-                } else {
-                    displayText = text
+                let displayText = miraFakeMessageDisplayText(record: updated, text: text, localMedia: localMedia)
+                // Persist the local record first, then adjust Stars. If the
+                // ledger rejects the edit, restore the previous record before
+                // returning so all three projections remain unchanged.
+                guard account.miraMessageHistoryStore.updateFakeMessage(updated) else {
+                    return false
                 }
-                // Adjust the local Stars balance before mutating Postbox or
-                // the durable fake-message record. A failed debit must leave
-                // the visible message and ledger in their previous state.
                 guard account.miraFakeStarsLedger.adjustFakeStarsMessage(
                     id: existing.id,
                     peerId: peerId.toInt64(),
@@ -627,7 +646,8 @@ public extension TelegramEngine {
                     outgoing: existing.outgoing,
                     date: date
                 ) else {
-                    return
+                    _ = account.miraMessageHistoryStore.updateFakeMessage(existing)
+                    return false
                 }
                 let forwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
                 transaction.updateMessage(messageId, update: { _ in
@@ -649,7 +669,7 @@ public extension TelegramEngine {
                         media: localMedia
                     ))
                 })
-                _ = account.miraMessageHistoryStore.updateFakeMessage(updated)
+                return true
             }
         }
 
@@ -741,13 +761,22 @@ public extension TelegramEngine {
 
         public func miraRemoveFakeMessage(id: String) -> Signal<Void, NoError> {
             let account = self.account
+            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly else {
+                return .complete()
+            }
             return account.postbox.transaction { transaction -> Void in
                 if let record = account.miraMessageHistoryStore.fakeMessage(id: id) {
+                    if record.kind == .stars,
+                       !account.miraFakeStarsLedger.hasEntry(kind: .fakeStarsMessage, relatedId: record.id) {
+                        return
+                    }
                     if record.messageId != 0, record.messageNamespace == Namespaces.Message.Local, let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: record.messagePeerId) {
                         transaction.deleteMessages([MessageId(peerId: peerId, namespace: record.messageNamespace, id: record.messageId)], forEachMedia: nil)
                     }
                     if record.kind == .stars {
-                        _ = account.miraFakeStarsLedger.removeFakeStarsMessage(id: record.id, peerId: record.messagePeerId, date: record.date)
+                        guard account.miraFakeStarsLedger.removeFakeStarsMessage(id: record.id, peerId: record.messagePeerId, date: record.date) else {
+                            return
+                        }
                     }
                     account.miraMessageHistoryStore.removeFakeMessage(id: id)
                 }
@@ -756,6 +785,9 @@ public extension TelegramEngine {
 
         public func miraRemoveAllFakeMessages(peerId: PeerId) -> Signal<Void, NoError> {
             let account = self.account
+            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly else {
+                return .complete()
+            }
             let records = account.miraMessageHistoryStore.fakeMessages(in: peerId)
             let ids = records.map { $0.id }
             return account.postbox.transaction { transaction -> Void in
@@ -769,7 +801,9 @@ public extension TelegramEngine {
                     transaction.deleteMessages(messageIds, forEachMedia: nil)
                 }
                 for record in records where record.kind == .stars {
-                    _ = account.miraFakeStarsLedger.removeFakeStarsMessage(id: record.id, peerId: record.messagePeerId)
+                    guard account.miraFakeStarsLedger.removeFakeStarsMessage(id: record.id, peerId: record.messagePeerId, date: record.date) else {
+                        return
+                    }
                 }
                 account.miraMessageHistoryStore.removeFakeMessages(ids: ids)
             }

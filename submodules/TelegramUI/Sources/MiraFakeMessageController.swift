@@ -381,10 +381,12 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         // lookup for the label shown in the original fake message.
         if let editingRecordId = state.editingRecordId {
             let _ = (context.engine.messages.miraUpdateFakeMessage(id: editingRecordId, text: texts[0], date: baseDate, kind: state.kind, media: mediaDescriptor)
-            |> deliverOnMainQueue).start(completed: {
+            |> deliverOnMainQueue).start(next: { success in
                 state.isSubmitting = false
                 arguments.updated()
-                dismissImpl?()
+                if success {
+                    dismissImpl?()
+                }
             })
             return
         }

@@ -1274,9 +1274,12 @@ func peerInfoScreenData(
                         return .none
                     }
                     if user.id == context.account.peerId {
-                        // Keep the AyuGram-style local default ("last seen just now").
-                        // Real presence is opt-in and remains a presentation-only setting.
-                        if context.sharedContext.immediateMiraSettings.showRealLastSeen, let presence = view.peerPresences[userPeerId] as? TelegramUserPresence {
+                        // The account's own presence is server-authoritative. Ghost mode
+                        // controls outgoing presence packets, but must not replace the
+                        // timestamp Telegram returned for the profile view. Older cached
+                        // accounts may not have a presence yet, so retain the normal
+                        // Telegram fallback until the first server snapshot arrives.
+                        if let presence = view.peerPresences[userPeerId] as? TelegramUserPresence {
                             return .presence(presence)
                         } else {
                             return .selfLastSeenJustNow

@@ -1253,7 +1253,6 @@ private enum StuxnetPrivacyEntry: ItemListNodeEntry {
 private func stuxnetPrivacyEntries(settings: MiraSettings) -> [StuxnetPrivacyEntry] {
     var entries: [StuxnetPrivacyEntry] = []
     entries.append(.showLocalOnline(settings.showLocalOnline))
-    entries.append(.showRealLastSeen(settings.showRealLastSeen))
     entries.append(.localPeerOverrides(settings.localPeerOverrides.count))
     entries.append(.autoClearClipboard(settings.autoClearClipboard))
     entries.append(.hidePhoneNumber(settings.hidePhoneNumber))

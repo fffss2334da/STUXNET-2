@@ -566,6 +566,17 @@ public final class MiraMessageHistoryStore {
         }
     }
 
+    /// Future or malformed local fake-message snapshots are exposed as
+    /// read-only. Callers that also mutate Postbox/Stars use this guard before
+    /// starting a multi-store operation, so a partial delete cannot leave a
+    /// durable message with no editable local record.
+    public var isFakeMessagesReadOnly: Bool {
+        return self.queue.sync {
+            self.loadFakesIfNeeded()
+            return self.fakeMessagesReadOnly
+        }
+    }
+
     public func addFakeMessage(_ record: FakeMessageRecord) {
         self.addFakeMessages([record])
     }
@@ -577,16 +588,20 @@ public final class MiraMessageHistoryStore {
         self.queue.sync {
             self.loadFakesIfNeeded()
             guard !self.fakeMessagesReadOnly else { return }
-            var existingIds = Set(self.fakeCache.map(\.id))
-            var inserted: [FakeMessageRecord] = []
+            var changed: [FakeMessageRecord] = []
             for record in records where !record.id.isEmpty && record.messageNamespace == Namespaces.Message.Local {
-                guard existingIds.insert(record.id).inserted else {
-                    continue
+                if let index = self.fakeCache.firstIndex(where: { $0.id == record.id }) {
+                    // Retried inserts can carry a new Postbox id after the
+                    // stale row was replaced. Upsert the record so the
+                    // durable projection follows the current message row.
+                    self.fakeCache[index] = record
+                } else {
+                    self.fakeCache.append(record)
                 }
-                self.fakeCache.append(record)
-                inserted.append(record)
+                changed.append(record)
             }
-            self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: inserted, removedIds: nil))
+            guard !changed.isEmpty else { return }
+            self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: changed, removedIds: nil))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()
         }
