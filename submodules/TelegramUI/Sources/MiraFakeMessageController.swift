@@ -1150,7 +1150,17 @@ private enum MiraFakeMessagesHubEntry: ItemListNodeEntry {
         case .add:
             return 0
         case let .chat(peerId, _):
-            return Int(truncatingIfNeeded: peerId) ^ 0x2a2a0000
+            // Include the full packed namespace/id pair. Using only the low
+            // bits made different users/channels overwrite each other's row
+            // in long-lived fake-message lists.
+            var hash: UInt64 = 14695981039346656037
+            let bytes = withUnsafeBytes(of: peerId.bigEndian) { Array($0) }
+            for byte in bytes {
+                hash ^= UInt64(byte)
+                hash = hash &* 1099511628211
+            }
+            let value = Int(truncatingIfNeeded: hash & 0x3fffffffffffffff)
+            return value == 0 ? 1 : value
         case .empty:
             return Int.max
         }
