@@ -708,7 +708,8 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
 
     let signal: Signal<(ItemListControllerState, (ItemListNodeState, Any)), NoError> = combineLatest(context.sharedContext.presentationData, versionPromise.get())
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, MiraFakeMessageControllerArguments)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(state.editingRecordId == nil ? "Add Message" : "Edit Message"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: state.isSubmitting ? .activity : .regular, enabled: !state.isSubmitting && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
+        let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(miraLocalizedFakeText(isRussian, state.editingRecordId == nil ? "Добавить сообщение" : "Изменить сообщение", state.editingRecordId == nil ? "Add Message" : "Edit Message")), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: state.isSubmitting ? .activity : .regular, enabled: !state.isSubmitting && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
             resolveSenderAndAdd()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
 
@@ -754,9 +755,20 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         } else {
             pendingCount = state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1
         }
-        let countHint = pendingCount > 0 ? " Ready to add \(pendingCount) message\(pendingCount == 1 ? "" : "s")." : ""
-        let scriptHint = state.conversationMode ? "Conversation mode accepts me:/you:/them:/in: prefixes per line." : ""
-        entries.append(.hint("\(state.oneMessagePerLine ? "Each non-empty line becomes a separate message." : "") \(scriptHint)\(countHint)"))
+        let countHint: String
+        if pendingCount > 0 {
+            let noun = miraLocalizedFakeText(isRussian, pendingCount == 1 ? "сообщение" : "сообщений", pendingCount == 1 ? "message" : "messages")
+            countHint = miraLocalizedFakeText(isRussian, "Готово к добавлению: \(pendingCount) \(noun).", "Ready to add \(pendingCount) \(noun).")
+        } else {
+            countHint = ""
+        }
+        let lineHint = state.oneMessagePerLine
+            ? miraLocalizedFakeText(isRussian, "Каждая непустая строка станет отдельным сообщением.", "Each non-empty line becomes a separate message.")
+            : ""
+        let scriptHint = state.conversationMode
+            ? miraLocalizedFakeText(isRussian, "Режим переписки поддерживает префиксы me:/you:/them:/in:.", "Conversation mode accepts me:/you:/them:/in: prefixes per line.")
+            : ""
+        entries.append(.hint([lineHint, scriptHint, countHint].filter { !$0.isEmpty }.joined(separator: " ")))
 
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
 
@@ -1068,7 +1080,8 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
                 arguments.add()
             })
         case let .choose(title):
-            return ItemListDisclosureItem(presentationData: presentationData, title: title, label: "Username or ID", sectionId: self.section, style: .blocks, action: {
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListDisclosureItem(presentationData: presentationData, title: title, label: miraLocalizedFakeText(isRussian, "Username или ID", "Username or ID"), sectionId: self.section, style: .blocks, action: {
                 arguments.choose()
             })
         case let .count(text):
@@ -1124,18 +1137,19 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         let actionSheet = ActionSheetController(presentationData: presentationData)
         actionSheet.setItemGroups([
             ActionSheetItemGroup(items: [
-                ActionSheetButtonItem(title: "Edit", color: .accent, action: { [weak actionSheet] in
+                ActionSheetButtonItem(title: miraLocalizedFakeText(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru"), "Изменить", "Edit"), color: .accent, action: { [weak actionSheet] in
                     actionSheet?.dismissAnimated()
                     pushControllerImpl?(miraFakeMessageController(context: context, peerId: peerId, editing: record))
                 }),
-                ActionSheetButtonItem(title: record.isRead ? "Mark as unread" : "Mark as read", color: .accent, action: { [weak actionSheet] in
+                ActionSheetButtonItem(title: record.isRead ? miraLocalizedFakeText(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru"), "Отметить непрочитанным", "Mark as unread") : miraLocalizedFakeText(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru"), "Отметить прочитанным", "Mark as read"), color: .accent, action: { [weak actionSheet] in
                     actionSheet?.dismissAnimated()
                     let _ = context.engine.messages.miraSetFakeMessageRead(id: record.id, isRead: !record.isRead).start()
                 }),
                 ActionSheetButtonItem(title: presentationData.strings.Common_Delete, color: .destructive, action: { [weak actionSheet] in
                     actionSheet?.dismissAnimated()
                     let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-                    let controller = textAlertController(context: context, title: "Remove Message?", text: "This message will be removed from the chat.", actions: [
+                    let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                    let controller = textAlertController(context: context, title: miraLocalizedFakeText(isRussian, "Удалить сообщение?", "Remove Message?"), text: miraLocalizedFakeText(isRussian, "Это сообщение будет удалено из чата.", "This message will be removed from the chat."), actions: [
                         TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
                         TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                             let _ = context.engine.messages.miraRemoveFakeMessage(id: record.id).start()
@@ -1153,7 +1167,8 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         presentControllerImpl?(actionSheet)
     }, confirmRemoveAll: {
         let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-        let controller = textAlertController(context: context, title: "Remove Messages?", text: "All added messages in this chat will be removed.", actions: [
+        let isRussian = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let controller = textAlertController(context: context, title: miraLocalizedFakeText(isRussian, "Удалить сообщения?", "Remove Messages?"), text: miraLocalizedFakeText(isRussian, "Все добавленные сообщения в этом чате будут удалены.", "All added messages in this chat will be removed."), actions: [
             TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
             TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                 let _ = context.engine.messages.miraRemoveAllFakeMessages(peerId: peerId).start()
@@ -1162,7 +1177,8 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         presentControllerImpl?(controller)
     }, confirmRemove: { record in
         let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-        let controller = textAlertController(context: context, title: "Remove Message?", text: "This message will be removed from the chat.", actions: [
+        let isRussian = strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let controller = textAlertController(context: context, title: miraLocalizedFakeText(isRussian, "Удалить сообщение?", "Remove Message?"), text: miraLocalizedFakeText(isRussian, "Это сообщение будет удалено из чата.", "This message will be removed from the chat."), actions: [
             TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
             TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                 let _ = context.engine.messages.miraRemoveFakeMessage(id: record.id).start()
@@ -1183,7 +1199,14 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         var entries: [MiraFakeMessagesListEntry] = []
         entries.append(.add(miraLocalizedFakeText(isRussian, "Добавить сообщение", "Add Message")))
         entries.append(.choose(miraLocalizedFakeText(isRussian, "Выбрать чат Telegram", "Choose Telegram chat")))
-        entries.append(.count(peerRecords.isEmpty ? miraLocalizedFakeText(isRussian, "Нет сообщений", "No messages") : "\(peerRecords.count) (miraLocalizedFakeText(isRussian, peerRecords.count == 1 ? "сообщение" : "сообщений", peerRecords.count == 1 ? "message" : "messages"))"))
+        let countText: String
+        if peerRecords.isEmpty {
+            countText = miraLocalizedFakeText(isRussian, "Нет сообщений", "No messages")
+        } else {
+            let noun = miraLocalizedFakeText(isRussian, peerRecords.count == 1 ? "сообщение" : "сообщений", peerRecords.count == 1 ? "message" : "messages")
+            countText = "\(peerRecords.count) \(noun)"
+        }
+        entries.append(.count(countText))
         if peerRecords.isEmpty {
             entries.append(.empty(miraLocalizedFakeText(isRussian, "Сообщений пока нет", "No messages yet.")))
         } else {
@@ -1213,7 +1236,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
 
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text("Messages"),
+            title: .text(miraLocalizedFakeText(isRussian, "Сообщения", "Messages")),
             leftNavigationButton: nil,
             rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: true, action: {
                 arguments.add()
