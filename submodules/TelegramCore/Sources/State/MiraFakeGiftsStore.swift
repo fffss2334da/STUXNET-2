@@ -436,7 +436,7 @@ public final class MiraFakeGiftsStore {
 
     @discardableResult
     public func createLocalCollection(ownerPeerId: PeerId, title: String, gifts: [ProfileGiftsContext.State.StarGift]) -> MiraFakeGiftCollection? {
-        return self.queue.sync {
+        return self.queue.sync { () -> MiraFakeGiftCollection? in
             self.loadIfNeeded()
             guard !self.readOnly else {
                 return nil
@@ -475,7 +475,7 @@ public final class MiraFakeGiftsStore {
 
     @discardableResult
     public func updateLocalCollection(ownerPeerId: PeerId, collectionId: Int32, title: String? = nil, gifts: [ProfileGiftsContext.State.StarGift]? = nil) -> MiraFakeGiftCollection? {
-        return self.queue.sync {
+        return self.queue.sync { () -> MiraFakeGiftCollection? in
             self.loadIfNeeded()
             guard !self.readOnly,
                   let index = self.collectionsCache.firstIndex(where: { $0.id == collectionId && $0.ownerPeerId == ownerPeerId.toInt64() }) else {
@@ -509,7 +509,7 @@ public final class MiraFakeGiftsStore {
 
     @discardableResult
     public func deleteLocalCollection(ownerPeerId: PeerId, collectionId: Int32) -> Bool {
-        return self.queue.sync {
+        return self.queue.sync { () -> Bool in
             self.loadIfNeeded()
             guard !self.readOnly,
                   let index = self.collectionsCache.firstIndex(where: { $0.id == collectionId && $0.ownerPeerId == ownerPeerId.toInt64() }) else {
