@@ -1681,13 +1681,14 @@ private enum StuxnetFakeStarsLedgerEntry: ItemListNodeEntry {
     case header(String)
     case balance(String)
     case transaction(Int, String)
+    case deleteTransaction(Int, String, String, Int64)
     case empty(String)
 
     var section: ItemListSectionId {
         switch self {
         case .header, .balance:
             return 0
-        case .transaction, .empty:
+        case .transaction, .deleteTransaction, .empty:
             return 1
         }
     }
@@ -1700,8 +1701,10 @@ private enum StuxnetFakeStarsLedgerEntry: ItemListNodeEntry {
             return 1
         case let .transaction(index, _):
             return 10 + index
+        case let .deleteTransaction(index, _, _, _):
+            return 10000 + index
         case .empty:
-            return 10000
+            return 20000
         }
     }
 
@@ -1717,6 +1720,10 @@ private enum StuxnetFakeStarsLedgerEntry: ItemListNodeEntry {
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .transaction(_, text), let .empty(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        case let .deleteTransaction(_, text, id, peerId):
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Delete \(text)", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
+                _ = (arguments as? MiraFakeStarsLedger)?.removeFakeStarsMessage(id: id, peerId: peerId)
+            })
         }
     }
 }
@@ -1763,14 +1770,31 @@ private func stuxnetFakeStarsLedgerController(context: AccountContext) -> ViewCo
         if snapshot.entries.isEmpty {
             entries.append(.empty("No transactions yet."))
         } else {
+            let deletedIds = Set(snapshot.entries.compactMap { entry -> String? in
+                guard entry.kind == .fakeStarsMessage, let relatedId = entry.relatedId, relatedId.hasSuffix(":delete") else {
+                    return nil
+                }
+                return String(relatedId.dropLast(":delete".count))
+            })
             let formatter = DateFormatter()
             formatter.dateStyle = .short
             formatter.timeStyle = .short
             for (index, entry) in snapshot.entries.reversed().enumerated() {
+                if entry.kind == .fakeStarsMessage,
+                   let relatedId = entry.relatedId,
+                   (deletedIds.contains(relatedId) || relatedId.contains(":edit:")) {
+                    continue
+                }
                 let sign = entry.delta >= 0 ? "+" : ""
                 let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(entry.date)))
                 let note = entry.note.map { " · \(stuxnetStarsLedgerNote($0))" } ?? ""
-                entries.append(.transaction(index, "\(date) · \(stuxnetFakeStarsLedgerKindTitle(entry.kind)) · \(sign)\(entry.delta) · \(entry.balance)\(note)"))
+                let title = "\(date) · \(stuxnetFakeStarsLedgerKindTitle(entry.kind)) · \(sign)\(entry.delta) · \(entry.balance)\(note)"
+                entries.append(.transaction(index, title))
+                if entry.kind == .fakeStarsMessage,
+                   let relatedId = entry.relatedId,
+                   !relatedId.contains(":") {
+                    entries.append(.deleteTransaction(index, title, relatedId, entry.peerId ?? context.account.peerId.toInt64()))
+                }
             }
         }
         let controllerState = ItemListControllerState(
@@ -1781,7 +1805,7 @@ private func stuxnetFakeStarsLedgerController(context: AccountContext) -> ViewCo
             backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back),
             animateChanges: true
         )
-        return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), NSNull()))
+        return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), context.account.miraFakeStarsLedger))
     }
     return ItemListController(context: context, state: signal)
 }

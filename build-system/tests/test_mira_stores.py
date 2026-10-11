@@ -116,6 +116,11 @@ def static_regressions() -> None:
         raise RuntimeError("local Stars projections must not expose a server withdrawal action")
     if "itemSubtitle = item.description" not in STARS_LIST_UI.read_text(encoding="utf-8"):
         raise RuntimeError("Stars history must not inject a generic fake/local subtitle")
+    ledger_ui = (ROOT / "submodules/SettingsUI/Sources/StuxnetSettingsController.swift").read_text(encoding="utf-8")
+    if "case deleteTransaction" not in ledger_ui or "removeFakeStarsMessage(id: id, peerId: peerId)" not in ledger_ui:
+        raise RuntimeError("local fake Stars history must expose deletion for fake message transactions")
+    if "let deletedIds = Set(snapshot.entries.compactMap" not in ledger_ui:
+        raise RuntimeError("deleted fake Stars transactions must be removed from the rendered journal")
     scheduled_branch = remove_operations.split("if isScheduled {", 1)[1].split("} else if isQuickReply", 1)[0]
     if "|> retryRequest" not in scheduled_branch:
         raise RuntimeError("scheduled-message deletion must retry until the RPC succeeds")
