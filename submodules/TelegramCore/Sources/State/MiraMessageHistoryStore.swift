@@ -593,8 +593,11 @@ public final class MiraMessageHistoryStore {
                 if let index = self.fakeCache.firstIndex(where: { $0.id == record.id }) {
                     // Retried inserts can carry a new Postbox id after the
                     // stale row was replaced. Upsert the record so the
-                    // durable projection follows the current message row.
-                    self.fakeCache[index] = record
+                    // durable projection follows the current message row,
+                    // while preserving the independent local read marker.
+                    var updatedRecord = record
+                    updatedRecord.isRead = self.fakeCache[index].isRead
+                    self.fakeCache[index] = updatedRecord
                 } else {
                     self.fakeCache.append(record)
                 }
