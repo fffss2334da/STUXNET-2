@@ -515,7 +515,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         addMessages(nil, sender)
     }
 
-    let signal = combineLatest(context.sharedContext.presentationData, versionPromise.get())
+    let signal: Signal<(ItemListControllerState, (ItemListNodeState, Any)), NoError> = combineLatest(context.sharedContext.presentationData, versionPromise.get())
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, MiraFakeMessageControllerArguments)) in
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(state.editingRecordId == nil ? "Add Message" : "Edit Message"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: state.isSubmitting ? .activity : .regular, enabled: !state.isSubmitting && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
             resolveSenderAndAdd()
@@ -699,7 +699,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
                 guard let peer, case .user = peer else {
                     let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
                     let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Укажите пользователя Telegram, чтобы открыть личную переписку." : "Choose a Telegram user to open a personal conversation.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
-                    context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+                    context.sharedContext.mainWindow?.present(alert, on: .root)
                     return
                 }
                 push(context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil))
@@ -713,7 +713,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
                 guard let peer, case .user = peer else {
                     let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
                     let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Введите username или ID пользователя, уже известного этому аккаунту." : "Enter a Telegram username or an ID already known by this account.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
-                    context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+                    context.sharedContext.mainWindow?.present(alert, on: .root)
                     return
                 }
                 openPeer(peer.id)
@@ -731,7 +731,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
             } else if case .result = result {
                 let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
                 let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Проверьте username и попробуйте ещё раз." : "Check the username and try again.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
-                context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+                context.sharedContext.mainWindow?.present(alert, on: .root)
             }
         }))
     }
@@ -758,7 +758,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
             state.version += 1
             versionPromise.set(state.version)
         })
-        return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), arguments))
+        return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), arguments as Any))
     }
     let controller = ItemListController(context: context, state: signal)
     controller.navigationPresentation = .modal
@@ -786,14 +786,16 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
         switch self {
         case .add:
             return 0
-        case .count:
+        case .choose:
             return 1
+        case .count:
+            return 2
         case let .message(_, record, _, _):
             // Row identifiers remain stable when the list is sorted and cannot
             // collide with the fixed Add/Count/Remove rows at large counts.
             let value = Int(truncatingIfNeeded: record.stableUniqueId)
             switch value {
-            case 0, 1, 100000, 100001:
+            case 0, 1, 2, 100000, 100001:
                 return value ^ 0x40000000
             default:
                 return value
