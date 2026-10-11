@@ -436,6 +436,17 @@ extension ChatControllerImpl {
                             }
                         }
                         
+                        if self.context.sharedContext.immediateMiraSettings.fakeStarsEnabled {
+                            let relatedId = "reaction:\(message.id.namespace):\(message.id.id):\(UUID().uuidString)"
+                            guard self.context.account.miraFakeStarsLedger.recordChannelReactionStars(id: relatedId, peerId: message.id.peerId.toInt64(), stars: 1) else {
+                                controller?.dismiss()
+                                return
+                            }
+                            let _ = self.context.engine.messages.addLocalStarsReaction(id: message.id, count: 1, privacy: nil).startStandalone()
+                            controller?.dismiss()
+                            return
+                        }
+
                         guard let starsContext = self.context.starsContext else {
                             return
                         }

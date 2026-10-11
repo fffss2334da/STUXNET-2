@@ -73,6 +73,81 @@ public func updateMessageReactionsInteractively(account: Account, messageIds: [M
         }
         
         for messageId in messageIds {
+            // Local projections (fake messages and gifts) must never create a
+            // pending network action. Keep their reactions in the same
+            // ReactionsMessageAttribute used by Telegram's renderer so the
+            // existing reaction UI updates immediately and survives reloads.
+            if messageId.namespace == Namespaces.Message.Local {
+                let selectedReactions = reactions.prefix(maxCount)
+                transaction.updateMessage(messageId, update: { currentMessage in
+                    let existingAttribute = currentMessage.attributes.first(where: { $0 is ReactionsMessageAttribute }) as? ReactionsMessageAttribute
+                    let existingReactions = existingAttribute?.reactions ?? []
+                    var localReactions: [MessageReaction] = []
+                    var recentPeers: [ReactionsMessageAttribute.RecentPeer] = []
+                    for (index, reaction) in selectedReactions.enumerated() {
+                        let value = reaction.reaction
+                        let count = max(1, existingReactions.first(where: { $0.value == value })?.count ?? 1)
+                        localReactions.append(MessageReaction(value: value, count: count, chosenOrder: index))
+                        recentPeers.append(ReactionsMessageAttribute.RecentPeer(
+                            value: value,
+                            isLarge: isLarge,
+                            isUnseen: false,
+                            isMy: true,
+                            peerId: account.peerId,
+                            timestamp: Int32(clamping: Int64(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970))
+                        ))
+                        if case let .custom(fileId, file) = reaction, let file {
+                            transaction.storeMediaIfNotPresent(media: file)
+                            _ = fileId
+                        }
+                    }
+
+                    var attributes = currentMessage.attributes.filter { attribute in
+                        !(attribute is ReactionsMessageAttribute) && !(attribute is PendingReactionsMessageAttribute)
+                    }
+                    if !localReactions.isEmpty {
+                        attributes.append(ReactionsMessageAttribute(
+                            canViewList: existingAttribute?.canViewList ?? true,
+                            isTags: existingAttribute?.isTags ?? false,
+                            reactions: localReactions,
+                            recentPeers: recentPeers,
+                            topPeers: [ReactionsMessageAttribute.TopPeer(peerId: account.peerId, count: Int32(localReactions.count), isTop: false, isMy: true, isAnonymous: false)]
+                        ))
+                    }
+
+                    var forwardInfo: StoreMessageForwardInfo?
+                    if let value = currentMessage.forwardInfo {
+                        forwardInfo = StoreMessageForwardInfo(
+                            authorId: value.author?.id,
+                            sourceId: value.source?.id,
+                            sourceMessageId: value.sourceMessageId,
+                            date: value.date,
+                            authorSignature: value.authorSignature,
+                            psaType: value.psaType,
+                            flags: value.flags
+                        )
+                    }
+                    return .update(StoreMessage(
+                        id: currentMessage.id,
+                        customStableId: nil,
+                        globallyUniqueId: currentMessage.globallyUniqueId,
+                        groupingKey: currentMessage.groupingKey,
+                        threadId: currentMessage.threadId,
+                        timestamp: currentMessage.timestamp,
+                        flags: StoreMessageFlags(currentMessage.flags),
+                        tags: currentMessage.tags,
+                        globalTags: currentMessage.globalTags,
+                        localTags: currentMessage.localTags,
+                        forwardInfo: forwardInfo,
+                        authorId: currentMessage.author?.id,
+                        text: currentMessage.text,
+                        attributes: attributes,
+                        media: currentMessage.media
+                    ))
+                })
+                continue
+            }
+
             var mappedReactions: [PendingReactionsMessageAttribute.PendingReaction] = []
             
             var reactions: [UpdateMessageReaction] = reactions
