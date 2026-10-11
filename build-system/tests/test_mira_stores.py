@@ -33,6 +33,11 @@ STAR_GIFT_COLLECTIONS = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/P
 STARS = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/Payments/Stars.swift"
 STARS_STATS_UI = ROOT / "submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsStatisticsScreen.swift"
 STARS_LIST_UI = ROOT / "submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsListPanelComponent.swift"
+CHAT_LIST_ENTRIES = ROOT / "submodules/ChatListUI/Sources/Node/ChatListNodeEntries.swift"
+CHAT_HISTORY_ENTRIES = ROOT / "submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift"
+CHAT_HISTORY_NODE = ROOT / "submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
+CHAT_INPUT_PANELS = ROOT / "submodules/TelegramUI/Sources/ChatInterfaceStateInputPanels.swift"
+CHAT_CONTROLLER = ROOT / "submodules/TelegramUI/Sources/ChatController.swift"
 PEER = ROOT / "submodules/Postbox/Sources/Peer.swift"
 SIGNALS = ROOT / "submodules/SSignalKit/SwiftSignalKit/Source"
 
@@ -124,6 +129,30 @@ def static_regressions() -> None:
         raise RuntimeError("own profile must render the server presence timestamp")
     if "updateServerLastSeen" not in presence_gate or "userStatusOfflineData.wasOnline" not in presence_updates:
         raise RuntimeError("server wasOnline must be retained across local presence updates")
+
+    chat_list = CHAT_LIST_ENTRIES.read_text(encoding="utf-8")
+    chat_history = CHAT_HISTORY_ENTRIES.read_text(encoding="utf-8")
+    chat_history_node = CHAT_HISTORY_NODE.read_text(encoding="utf-8")
+    chat_input = CHAT_INPUT_PANELS.read_text(encoding="utf-8")
+    chat_controller = CHAT_CONTROLLER.read_text(encoding="utf-8")
+    if "localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool)" not in chat_list:
+        raise RuntimeError("chat list must receive local projection switches")
+    if "message.id.namespace == Namespaces.Message.Local" not in chat_list or "fakeGiftMessageIds.contains(message.id)" not in chat_list:
+        raise RuntimeError("chat list must filter only locally-owned fake rows")
+    if "fakeMessagesByMessageId[message.id]" not in chat_list or "lastMessage.index" not in chat_list or "MessageIndex.absoluteLowerBound()" not in chat_list:
+        raise RuntimeError("chat list must recompute its ordering index after hiding a fake preview")
+    if "localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool)" not in chat_history:
+        raise RuntimeError("chat history must receive local projection switches")
+    if "fakeMessagesByMessageId[message.id]" not in chat_history or "fakeGiftMessageIds.contains(message.id)" not in chat_history:
+        raise RuntimeError("chat history must filter only locally-owned fake rows")
+    if "fakeMessagesByMessageId()" not in chat_history or "localChatMessageIds()" not in chat_history:
+        raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
+    if "chatHistoryNode_localProjectionSettings" not in chat_history_node:
+        raise RuntimeError("open chat history must refresh when local projection switches change")
+    if "fakeMessagesEnabled ? chatPresentationInterfaceState.renderedPeer?.peer.flatMap" not in chat_input:
+        raise RuntimeError("fake channel composer must disappear when fake messages are disabled")
+    if "immediateMiraSettings.fakeMessagesEnabled" not in chat_controller:
+        raise RuntimeError("fake channel actions must be gated by fake messages setting")
 
 
 def declaration(source: str, start: str, end: str | None = None) -> str:

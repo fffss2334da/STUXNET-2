@@ -604,7 +604,11 @@ struct ChatListContactPeer {
     }
 }
 
-func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, isMainTab: Bool) -> (entries: [ChatListNodeEntry], loading: Bool) {
+func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool), isMainTab: Bool) -> (entries: [ChatListNodeEntry], loading: Bool) {
+    let messageHistoryStore = MiraMessageHistoryStore.store(for: accountPeerId)
+    let fakeGiftsStore = MiraFakeGiftsStore.store(for: accountPeerId)
+    let fakeMessagesByMessageId = !localProjectionSettings.fakeMessages || !localProjectionSettings.fakeStars ? (messageHistoryStore?.fakeMessagesByMessageId() ?? [:]) : [:]
+    let fakeGiftMessageIds = !localProjectionSettings.fakeGifts ? (fakeGiftsStore?.localChatMessageIds() ?? []) : []
     var groupItems = view.groupItems
     if isMainTab && state.archiveStoryState != nil && groupItems.isEmpty {
         groupItems.append(EngineChatList.GroupItem(
@@ -692,6 +696,18 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
             updatedMessages = []
             updatedCombinedReadState = nil
         }
+        updatedMessages = updatedMessages.filter { message in
+            guard message.id.namespace == Namespaces.Message.Local else {
+                return true
+            }
+            if let fakeMessage = fakeMessagesByMessageId[message.id] {
+                return localProjectionSettings.fakeMessages && (fakeMessage.kind != .stars || localProjectionSettings.fakeStars)
+            }
+            if fakeGiftMessageIds.contains(message.id) {
+                return localProjectionSettings.fakeGifts
+            }
+            return true
+        }
 
         var draftState: ChatListItemContent.DraftState?
         if let draft = entry.draft {
@@ -730,8 +746,17 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
             }
         }
 
+        let itemIndex: EngineChatList.Item.Index
+        if case let .chatList(index) = entry.index, let lastMessage = updatedMessages.last {
+            itemIndex = .chatList(EngineChatList.Item.Index.ChatList(pinningIndex: index.pinningIndex, messageIndex: lastMessage.index))
+        } else if case let .chatList(index) = entry.index, !entry.messages.isEmpty, updatedMessages.isEmpty {
+            itemIndex = .chatList(EngineChatList.Item.Index.ChatList(pinningIndex: index.pinningIndex, messageIndex: MessageIndex.absoluteLowerBound()))
+        } else {
+            itemIndex = entry.index
+        }
+
         let entry: ChatListNodeEntry = .PeerEntry(ChatListNodeEntry.PeerEntryData(
-            index: offsetPinnedIndex(entry.index, offset: pinnedIndexOffset),
+            index: offsetPinnedIndex(itemIndex, offset: pinnedIndexOffset),
             presentationData: state.presentationData,
             messages: updatedMessages,
             readState: updatedCombinedReadState,

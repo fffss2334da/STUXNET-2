@@ -21,6 +21,7 @@ public struct MiraCoreGateSnapshot: Equatable {
     public var localPremium: Bool = false
     public var filterZalgo: Bool = false
     public var isGhostActive: Bool = false
+    public var fakeMessagesEnabled: Bool = true
     public var fakeGiftsEnabled: Bool = false
     public var fakeStarsEnabled: Bool = false
     public var voiceChangerEnabled: Bool = false
@@ -185,6 +186,10 @@ public final class MiraCoreGate {
     
     public var fakeGiftsEnabled: Bool {
         return self.snapshot.fakeGiftsEnabled
+    }
+
+    public var fakeMessagesEnabled: Bool {
+        return self.snapshot.fakeMessagesEnabled
     }
     
     public var voiceChangerEnabled: Bool {

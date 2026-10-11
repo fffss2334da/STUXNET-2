@@ -47,6 +47,7 @@ func chatHistoryEntriesForView(
     groupMessages: Bool,
     reverseGroupedMessages: Bool,
     selectedMessages: Set<MessageId>?,
+    localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool),
     presentationData: ChatPresentationData,
     historyAppearsCleared: Bool,
     skipViewOnceMedia: Bool,
@@ -141,9 +142,26 @@ func chatHistoryEntriesForView(
     }
     
     var count = 0
+    let fakeMessagesByMessageId = !localProjectionSettings.fakeMessages || !localProjectionSettings.fakeStars ? context.account.miraMessageHistoryStore.fakeMessagesByMessageId() : [:]
+    let fakeGiftMessageIds = !localProjectionSettings.fakeGifts ? context.account.miraFakeGiftsStore.localChatMessageIds() : []
     loop: for entry in view.entries {
         var message = entry.message
         var isRead = entry.isRead
+
+        // Local is a shared Postbox namespace: Telegram uses it for service
+        // rows as well as our account-local projections. Hide only records
+        // owned by the local stores when their corresponding feature is off.
+        // This keeps ordinary Telegram history intact while making a toggle
+        // behave immediately for an already-open chat.
+        if message.id.namespace == Namespaces.Message.Local {
+            if let fakeMessage = fakeMessagesByMessageId[message.id] {
+                if !localProjectionSettings.fakeMessages || (fakeMessage.kind == .stars && !localProjectionSettings.fakeStars) {
+                    continue loop
+                }
+            } else if fakeGiftMessageIds.contains(message.id) && !localProjectionSettings.fakeGifts {
+                continue loop
+            }
+        }
         
         var pinToTop = false
         if message.stableId == pinToTopStableId {

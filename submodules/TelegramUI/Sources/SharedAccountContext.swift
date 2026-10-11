@@ -255,6 +255,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         snapshot.filterZalgo = settings.filterZalgo
         snapshot.localMessageEditEnabled = settings.localMessageEditEnabled
         snapshot.isGhostActive = ghostSettings.isGhostActive
+        snapshot.fakeMessagesEnabled = settings.fakeMessagesEnabled
         snapshot.fakeGiftsEnabled = settings.fakeGiftsEnabled
         snapshot.fakeStarsEnabled = settings.fakeStarsEnabled
         snapshot.voiceChangerEnabled = settings.voiceChangerEnabled

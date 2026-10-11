@@ -31,9 +31,9 @@ func chatInputFormulaRenderResult(context: RichTextFormulaRenderContext) -> Rich
 }
 
 func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState: ChatPresentationInterfaceState, context: AccountContext, currentPanel: ChatInputPanelNode?, currentSecondaryPanel: ChatInputPanelNode?, textInputPanelNode: ChatTextInputPanelNode?, chatControllerInteraction: ChatControllerInteraction?, interfaceInteraction: ChatPanelInterfaceInteraction?) -> (primary: ChatInputPanelNode?, secondary: ChatInputPanelNode?) {
-    let localAdminChannel = chatPresentationInterfaceState.renderedPeer?.peer.flatMap {
+    let localAdminChannel = context.sharedContext.immediateMiraSettings.fakeMessagesEnabled ? chatPresentationInterfaceState.renderedPeer?.peer.flatMap {
         context.account.miraFakeChannelsStore.channel(attachedTo: $0.id)
-    }
+    } : nil
     if localAdminChannel == nil, let renderedPeer = chatPresentationInterfaceState.renderedPeer, renderedPeer.peer?.restrictionText(platform: "ios", contentSettings: context.currentContentSettings.with { $0 }) != nil {
         return (nil, nil)
     }

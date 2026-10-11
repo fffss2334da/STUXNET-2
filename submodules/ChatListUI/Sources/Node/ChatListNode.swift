@@ -2182,6 +2182,14 @@ public final class ChatListNode: ListViewImpl {
         }
         |> distinctUntilChanged
         
+        let localProjectionSettings = miraSettingsSignal(accountManager: context.sharedContext.accountManager)
+        |> map { settings in
+            return (settings.fakeMessagesEnabled, settings.fakeGiftsEnabled, settings.fakeStarsEnabled)
+        }
+        |> distinctUntilChanged(isEqual: { lhs, rhs in
+            return lhs.0 == rhs.0 && lhs.1 == rhs.1 && lhs.2 == rhs.2
+        })
+
         let chatListNodeViewTransition = combineLatest(queue: viewProcessingQueue,
             hideArchivedFolderByDefault,
             displayArchiveIntro,
@@ -2192,16 +2200,17 @@ public final class ChatListNode: ListViewImpl {
             contacts,
             chatListFilters,
             accountIsPremium,
-            context.account.miraLocalProfileOverridesStore.changes
+            context.account.miraLocalProfileOverridesStore.changes,
+            localProjectionSettings
         )
-        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, localProfileOverrides) -> Signal<ChatListNodeListViewTransition, NoError> in
+        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, localProfileOverrides, localProjectionSettings) -> Signal<ChatListNodeListViewTransition, NoError> in
             let (update, filter) = updateAndFilter
             
             let previousHideArchivedFolderByDefaultValue = previousHideArchivedFolderByDefault.swap(hideArchivedFolderByDefault)
             
             let innerIsMainTab = location == .chatList(groupId: .root) && chatListFilter == nil
             
-            let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
+            let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, localProjectionSettings: (fakeMessages: localProjectionSettings.0, fakeGifts: localProjectionSettings.1, fakeStars: localProjectionSettings.2), isMainTab: innerIsMainTab)
             var isEmpty = true
             var entries = rawEntries.filter { entry in
                 switch entry {

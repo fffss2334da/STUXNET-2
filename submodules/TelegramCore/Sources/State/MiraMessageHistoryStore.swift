@@ -536,6 +536,21 @@ public final class MiraMessageHistoryStore {
         }
     }
 
+    public func fakeMessagesByMessageId() -> [MessageId: FakeMessageRecord] {
+        return self.queue.sync {
+            self.loadFakesIfNeeded()
+            var result: [MessageId: FakeMessageRecord] = [:]
+            result.reserveCapacity(self.fakeCache.count)
+            for record in self.fakeCache where record.messageId != 0 && record.messageNamespace == Namespaces.Message.Local {
+                guard let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: record.messagePeerId) else {
+                    continue
+                }
+                result[MessageId(peerId: peerId, namespace: record.messageNamespace, id: record.messageId)] = record
+            }
+            return result
+        }
+    }
+
     public func fakeMessage(messageId: MessageId) -> FakeMessageRecord? {
         return self.queue.sync {
             self.loadFakesIfNeeded()

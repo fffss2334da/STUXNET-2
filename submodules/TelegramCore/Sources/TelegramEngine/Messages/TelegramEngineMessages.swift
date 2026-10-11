@@ -396,6 +396,9 @@ public extension TelegramEngine {
                 return .complete()
             }
             let account = self.account
+            guard MiraCoreGate.shared.snapshot(forAccountPeerId: account.peerId).fakeMessagesEnabled else {
+                return .complete()
+            }
             // Fake Stars are local currency. Refuse an outgoing batch before
             // touching Postbox when its total exceeds the local balance.
             let starsAmount = messages.reduce(Int64(0)) { partial, entry in
@@ -526,6 +529,9 @@ public extension TelegramEngine {
                 return .complete()
             }
             let account = self.account
+            guard MiraCoreGate.shared.snapshot(forAccountPeerId: account.peerId).fakeMessagesEnabled else {
+                return .complete()
+            }
             return account.postbox.transaction { transaction -> Void in
                 var records: [FakeMessageRecord] = []
                 var storeMessages: [StoreMessage] = []
@@ -718,6 +724,9 @@ public extension TelegramEngine {
                 return .complete()
             }
             let account = self.account
+            guard MiraCoreGate.shared.snapshot(forAccountPeerId: account.peerId).fakeMessagesEnabled else {
+                return .complete()
+            }
             return account.postbox.transaction { transaction -> Void in
                 var records: [FakeMessageRecord] = []
                 var storeMessages: [StoreMessage] = []

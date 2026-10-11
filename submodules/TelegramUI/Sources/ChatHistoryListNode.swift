@@ -1827,6 +1827,18 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
         )
         
         let contentSettings = self.context.engine.data.subscribe(TelegramEngine.EngineData.Item.Configuration.ContentSettings())
+
+        // Local fake projections are persisted in Postbox and therefore do
+        // not emit a cloud history update when their settings change. Include
+        // the feature switches in this transition signal so the history
+        // filter is re-evaluated without touching Telegram's own Local rows.
+        let localProjectionSettings = miraSettingsSignal(accountManager: context.sharedContext.accountManager)
+        |> map { settings in
+            return (settings.fakeMessagesEnabled, settings.fakeGiftsEnabled, settings.fakeStarsEnabled)
+        }
+        |> distinctUntilChanged(isEqual: { lhs, rhs in
+            return lhs.0 == rhs.0 && lhs.1 == rhs.1 && lhs.2 == rhs.2
+        })
         
         let maxReadStoryId: Signal<Int32?, NoError>
         if let peerId = self.chatLocation.peerId, peerId.namespace == Namespaces.Peer.CloudUser {
@@ -1934,8 +1946,9 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
             audioTranscriptionTrial |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_audioTranscriptionTrial"),
             chatThemes |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_chatThemes"),
             deviceContactsNumbers |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_deviceContactsNumbers"),
-            contentSettings |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_contentSettings")
-        ) |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_firstChatHistoryTransition")).startStrict(next: { [weak self] update, chatPresentationData, selectedMessages, updatingMedia, networkType, preferredStoryHighQuality, animatedEmojiStickers, additionalAnimatedEmojiStickers, customChannelDiscussionReadState, customThreadOutgoingReadState, availableReactions, availableMessageEffects, savedMessageTags, defaultReaction, accountPeer, accountCountry, suggestAudioTranscription, promises, topicAuthorId, translationState, maxReadStoryId, recommendedChannels, audioTranscriptionTrial, chatThemes, deviceContactsNumbers, contentSettings in
+            contentSettings |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_contentSettings"),
+            localProjectionSettings |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_localProjectionSettings")
+        ) |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_firstChatHistoryTransition")).startStrict(next: { [weak self] update, chatPresentationData, selectedMessages, updatingMedia, networkType, preferredStoryHighQuality, animatedEmojiStickers, additionalAnimatedEmojiStickers, customChannelDiscussionReadState, customThreadOutgoingReadState, availableReactions, availableMessageEffects, savedMessageTags, defaultReaction, accountPeer, accountCountry, suggestAudioTranscription, promises, topicAuthorId, translationState, maxReadStoryId, recommendedChannels, audioTranscriptionTrial, chatThemes, deviceContactsNumbers, contentSettings, localProjectionSettings in
             let (historyAppearsCleared, pendingUnpinnedAllMessages, pendingRemovedMessages, currentlyPlayingMessageIdAndType, scrollToMessageId, chatHasBots, allAdMessages) = promises
             
             if measure_isFirstTime {
@@ -2224,6 +2237,7 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
                     groupMessages: mode == .bubbles,
                     reverseGroupedMessages: reverseGroups,
                     selectedMessages: selectedMessages,
+                    localProjectionSettings: (fakeMessages: localProjectionSettings.0, fakeGifts: localProjectionSettings.1, fakeStars: localProjectionSettings.2),
                     presentationData: chatPresentationData,
                     historyAppearsCleared: historyAppearsCleared,
                     skipViewOnceMedia: mode != .bubbles,

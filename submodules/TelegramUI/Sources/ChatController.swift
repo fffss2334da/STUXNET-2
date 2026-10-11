@@ -324,6 +324,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     /// projection, so the regular send button must still be available.
     private func canSendMessagesInCurrentChat() -> Bool {
         if let peerId = self.chatLocation.peerId,
+           self.context.sharedContext.immediateMiraSettings.fakeMessagesEnabled,
            let channel = self.context.account.miraFakeChannelsStore.channel(attachedTo: peerId),
            channel.role != .member {
             return true
@@ -2283,6 +2284,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             // The resulting Postbox message still renders in the real chat
             // and is durable in the account-local fake history store.
             if let peerId = strongSelf.chatLocation.peerId,
+               strongSelf.context.sharedContext.immediateMiraSettings.fakeMessagesEnabled,
                let localChannel = strongSelf.context.account.miraFakeChannelsStore.channel(attachedTo: peerId),
                localChannel.role != .member {
                 let value = text.trimmingCharacters(in: .whitespacesAndNewlines)

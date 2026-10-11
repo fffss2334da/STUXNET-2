@@ -866,6 +866,43 @@ public final class MiraFakeGiftsStore {
         return MiraFakeGift.isLocalSavedId(savedId)
     }
 
+    /// Returns whether a Postbox local message is owned by the fake-gift
+    /// projection. Telegram also uses the Local namespace for its own
+    /// service rows, so callers must not treat every Local message as fake.
+    public func isLocalChatMessage(_ messageId: MessageId) -> Bool {
+        guard messageId.namespace == Namespaces.Message.Local else {
+            return false
+        }
+        return self.queue.sync {
+            self.loadIfNeeded()
+            return self.cache.contains { entry in
+                guard let packedPeerId = entry.chatMessagePeerId,
+                      let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: packedPeerId),
+                      let chatMessageId = entry.chatMessageId else {
+                    return false
+                }
+                return MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: chatMessageId) == messageId
+            }
+        }
+    }
+
+    public func localChatMessageIds() -> Set<MessageId> {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            var result = Set<MessageId>()
+            result.reserveCapacity(self.cache.count)
+            for entry in self.cache {
+                guard let packedPeerId = entry.chatMessagePeerId,
+                      let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: packedPeerId),
+                      let messageId = entry.chatMessageId else {
+                    continue
+                }
+                result.insert(MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: messageId))
+            }
+            return result
+        }
+    }
+
     /// Applies a local profile change without touching the network.
     public func updateLocalReference(_ reference: StarGiftReference, accountPeerId: PeerId, added: Bool? = nil, pinned: Bool? = nil) {
         guard case let .peer(peerId, savedId) = reference, peerId == accountPeerId else {
