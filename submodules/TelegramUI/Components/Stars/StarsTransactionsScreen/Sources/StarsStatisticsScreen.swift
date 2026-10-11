@@ -9,6 +9,7 @@ import ComponentDisplayAdapters
 import TelegramPresentationData
 import AccountContext
 import TelegramCore
+import TelegramUIPreferences
 import MultilineTextComponent
 import BalancedTextComponent
 import Markdown
