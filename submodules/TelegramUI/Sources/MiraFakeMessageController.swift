@@ -954,7 +954,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
         if case let .peerId(peerId) = destination {
             disposable.set((context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
             |> deliverOnMainQueue).start(next: { peer in
-                guard peer != nil else {
+                guard let peer else {
                     let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
                     let alert = textAlertController(context: context, title: isRussian ? "Чат не найден" : "Chat not found", text: isRussian ? "Введите username, ссылку на чат или ID, уже известный этому аккаунту Telegram." : "Enter a username, chat link, or ID already known by this Telegram account.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
                     context.sharedContext.mainWindow?.present(alert, on: .root)
