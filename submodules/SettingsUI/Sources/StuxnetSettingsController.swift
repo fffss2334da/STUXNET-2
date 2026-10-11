@@ -859,6 +859,7 @@ private func stuxnetPeerRoleOverridesController(context: AccountContext) -> View
             onlyWriteable: false,
             alwaysEnabled: true
         ))
+        selectionDisposable?.dispose()
         selectionDisposable = (selector.result |> take(1) |> deliverOnMainQueue).start(next: { [weak selector] result in
             guard case let .result(peerIds, _) = result,
                   let peerId = peerIds.compactMap({ value -> EnginePeer.Id? in

@@ -775,7 +775,7 @@ public func stuxnetFakeChannelsController(context: AccountContext) -> ViewContro
     }, edit: { channel in
         pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
     })
-    let signal = combineLatest(context.sharedContext.presentationData, store.changes)
+    let signal: Signal<(ItemListControllerState, (ItemListNodeState, StuxnetFakeChannelsArguments)), NoError> = combineLatest(context.sharedContext.presentationData, store.changes)
     |> map { presentationData, channels -> (ItemListControllerState, (ItemListNodeState, StuxnetFakeChannelsArguments)) in
         var entries: [StuxnetFakeChannelsEntry] = [.add]
         entries.append(contentsOf: channels.map { .channel($0) })
