@@ -1411,7 +1411,7 @@ private final class StarsTransactionsContextImpl {
                 title = nil
                 peer = .unsupported
             case .fakeChannelReaction:
-                flags = [.isLocal]
+                flags = [.isLocal, .isReaction]
                 title = nil
                 peer = .unsupported
             case .initial:

@@ -611,18 +611,21 @@ public final class MiraMessageHistoryStore {
             guard !self.fakeMessagesReadOnly else { return }
             var changed: [FakeMessageRecord] = []
             for record in records where !record.id.isEmpty && record.messageNamespace == Namespaces.Message.Local {
+                var persistedRecord = record
                 if let index = self.fakeCache.firstIndex(where: { $0.id == record.id }) {
                     // Retried inserts can carry a new Postbox id after the
                     // stale row was replaced. Upsert the record so the
                     // durable projection follows the current message row,
                     // while preserving the independent local read marker.
-                    var updatedRecord = record
-                    updatedRecord.isRead = self.fakeCache[index].isRead
-                    self.fakeCache[index] = updatedRecord
+                    persistedRecord.isRead = self.fakeCache[index].isRead
+                    self.fakeCache[index] = persistedRecord
                 } else {
-                    self.fakeCache.append(record)
+                    self.fakeCache.append(persistedRecord)
                 }
-                changed.append(record)
+                // Journal the exact value stored in the cache. In particular,
+                // an upsert must not write the incoming default read marker
+                // over the user's existing read state after a restart.
+                changed.append(persistedRecord)
             }
             guard !changed.isEmpty else { return }
             self.rebuildFakeMessageIndexLocked()

@@ -1020,42 +1020,61 @@ public final class TelegramStarRating: Codable, Equatable {
         self.nextLevelStars = nextLevelStars
     }
 
-    /// Keep a locally projected total inside the threshold range used by the
-    /// profile rating bar. Telegram provides the active threshold pair; extend
-    /// that interval in either direction when a local value crosses it.
+    /// Returns the lower threshold for a Telegram Stars rating level.
+    ///
+    /// The server sends the active pair of thresholds, but local projections
+    /// can be configured with an arbitrary total. Repeating the last server
+    /// interval made those projections drift into the wrong level. Keep the
+    /// published Telegram milestones exact and interpolate only the levels for
+    /// which Telegram does not expose a public milestone.
+    private static func threshold(for level: Int32) -> Int64 {
+        if level <= 1 {
+            return 0
+        }
+
+        let milestones: [(Int32, Int64)] = [
+            (2, 5_000),
+            (3, 12_000),
+            (4, 19_000),
+            (5, 27_000),
+            (10, 81_000),
+            (20, 212_000),
+            (50, 606_000),
+            (80, 1_000_000)
+        ]
+
+        if let exact = milestones.first(where: { $0.0 == level }) {
+            return exact.1
+        }
+        if level > milestones.last!.0 {
+            let previous = milestones[milestones.count - 2]
+            let last = milestones.last!
+            let step = max(1, (last.1 - previous.1) / Int64(last.0 - previous.0))
+            return last.1 + Int64(level - last.0) * step
+        }
+
+        for index in 1 ..< milestones.count {
+            let upper = milestones[index]
+            let lower = milestones[index - 1]
+            if level < upper.0 {
+                let levelSpan = Int64(upper.0 - lower.0)
+                let valueSpan = upper.1 - lower.1
+                let offset = Int64(level - lower.0)
+                return lower.1 + (valueSpan * offset) / levelSpan
+            }
+        }
+        return milestones.last!.1
+    }
+
+    /// Rebase a locally projected total onto Telegram's level thresholds.
     public func withUpdatedTotalStars(_ total: Int64) -> TelegramStarRating {
         let stars = max(0, total)
-        var level = self.level
-        var current = max(0, self.currentLevelStars)
-        var next = self.nextLevelStars.map { max(0, $0) }
-
-        let step: Int64
-        if let next, next > current {
-            step = next - current
-        } else {
-            step = max(1, current)
-        }
-
-        while level > 0 && stars < current {
-            let previous = max(0, current - step)
-            next = current
-            current = previous
-            level -= 1
-            if current == 0 {
-                break
-            }
-        }
-
-        while let threshold = next, stars >= threshold {
+        var level: Int32 = 1
+        while level < 99 && stars >= Self.threshold(for: level + 1) {
             level += 1
-            current = threshold
-            let newThreshold = threshold > Int64.max - step ? Int64.max : threshold + step
-            next = newThreshold == Int64.max ? nil : newThreshold
-            if newThreshold == Int64.max {
-                break
-            }
         }
-
+        let current = Self.threshold(for: level)
+        let next = level < 99 ? Self.threshold(for: level + 1) : nil
         return TelegramStarRating(level: level, currentLevelStars: current, stars: stars, nextLevelStars: next)
     }
     

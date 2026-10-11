@@ -354,7 +354,11 @@ public final class MiraFakeGiftsStore {
                     uniqueGifts.append(gift)
                 }
             }
-            self.cache = uniqueGifts
+            // Legacy array snapshots predate the versioned envelope and can
+            // contain user-edited transfer fees (including the old 1000-Star
+            // value). Normalize before exposing the cache so a transfer can
+            // never charge a stale fee during this migration window.
+            self.cache = uniqueGifts.map { self.normalizedForStorage($0) }
             self.collectionsCache = []
             self.needsMigrationWrite = true
         } else {
@@ -1518,6 +1522,13 @@ extension MiraFakeGiftsStore {
         transferred.ownerPeerId = recipientValue
         transferred.pendingTransferRecipientPeerId = nil
         transferred.fromName = nil
+        // A transfer creates a fresh recipient-side gift.  Do not carry the
+        // sender's profile presentation state into that copy: a hidden gift
+        // on the sender must not arrive in the recipient's Hidden section,
+        // and sender-owned collection ids must never leak to another profile.
+        transferred.isHidden = false
+        transferred.isSaved = false
+        transferred.collectionIds = []
         transferred.date = Int32(clamping: Int64(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970))
         transferred.chatMessagePeerId = nil
         transferred.chatMessageId = nil

@@ -1405,15 +1405,24 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     )
                 }
                 
+                let cachedPeerData = self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.CachedData(id: peer.id))
+                |> timeout(0.75, queue: .mainQueue(), alternate: .single(nil))
                 let _ = (combineLatest(queue: .mainQueue(),
-                    self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.CachedData(id: peer.id)),
+                    cachedPeerData,
                     forumSourcePeer
                 )
                 |> deliverOnMainQueue).start(next: { [weak self] cachedPeerData, forumSourcePeer in
                     guard let self else {
                         return
                     }
-                    guard let navigationController = self.navigationController as? NavigationController else {
+                    // Chat lists can be hosted inside the root tab controller or an
+                    // inline/preview container. In those cases UIKit's
+                    // `navigationController` is nil (or is not the Telegram
+                    // navigation type), which used to turn a tap into a silent
+                    // no-op. Always fall back to the account's root stack.
+                    guard let navigationController = (self.navigationController as? NavigationController)
+                        ?? (self.parent?.navigationController as? NavigationController)
+                        ?? (self.context.sharedContext.mainWindow?.viewController as? NavigationController) else {
                         return
                     }
                     

@@ -713,6 +713,53 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
             return true
         }
 
+        // Local fake messages keep their own read marker because changing
+        // Postbox's Local namespace read state would also affect unrelated
+        // service rows. Reconcile just the fake-message contribution in the
+        // chat-list counter so an incoming fake message is unread until the
+        // user opens the chat, and becomes read without a cloud read request.
+        if let peerId {
+            let ownedFakeRecords = messageHistoryStore?.fakeMessages(in: peerId).filter { record in
+                return record.messageNamespace == Namespaces.Message.Local
+            } ?? []
+            let fakeIncomingCount = Int32(clamping: ownedFakeRecords.reduce(Int64(0)) { partial, record in
+                return !record.outgoing ? partial + 1 : partial
+            })
+            if fakeIncomingCount > 0 {
+                let fakeUnreadCount = Int32(clamping: ownedFakeRecords.reduce(Int64(0)) { partial, record in
+                    let isVisible = record.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages
+                    return isVisible && !record.outgoing && !record.isRead ? partial + 1 : partial
+                })
+                if let currentReadState = updatedCombinedReadState,
+                   let combinedState = currentReadState._asReadCounters() {
+                    var adjustedStates: [(MessageId.Namespace, PeerReadState)] = []
+                    var adjustedLocalState = false
+                    for (namespace, state) in combinedState.states {
+                        guard namespace == Namespaces.Message.Local else {
+                            adjustedStates.append((namespace, state))
+                            continue
+                        }
+                        adjustedLocalState = true
+                        let adjustedCount = Int32(clamping: max(Int64(0), Int64(state.count) - Int64(fakeIncomingCount) + Int64(fakeUnreadCount)))
+                        switch state {
+                        case let .idBased(maxIncomingReadId, maxOutgoingReadId, maxKnownId, _, markedUnread):
+                            adjustedStates.append((namespace, .idBased(maxIncomingReadId: maxIncomingReadId, maxOutgoingReadId: maxOutgoingReadId, maxKnownId: maxKnownId, count: adjustedCount, markedUnread: markedUnread)))
+                        case let .indexBased(maxIncomingReadIndex, maxOutgoingReadIndex, _, markedUnread):
+                            adjustedStates.append((namespace, .indexBased(maxIncomingReadIndex: maxIncomingReadIndex, maxOutgoingReadIndex: maxOutgoingReadIndex, count: adjustedCount, markedUnread: markedUnread)))
+                        }
+                    }
+                    if !adjustedLocalState {
+                        adjustedStates.append((Namespaces.Message.Local, .idBased(maxIncomingReadId: 0, maxOutgoingReadId: 0, maxKnownId: 0, count: fakeUnreadCount, markedUnread: false)))
+                    }
+                    updatedCombinedReadState = EnginePeerReadCounters(state: CombinedPeerReadState(states: adjustedStates), isMuted: currentReadState.isMuted)
+                } else {
+                    updatedCombinedReadState = EnginePeerReadCounters(state: CombinedPeerReadState(states: [
+                        (Namespaces.Message.Local, .idBased(maxIncomingReadId: 0, maxOutgoingReadId: 0, maxKnownId: 0, count: fakeUnreadCount, markedUnread: false))
+                    ]), isMuted: false)
+                }
+            }
+        }
+
         var draftState: ChatListItemContent.DraftState?
         if let draft = entry.draft {
             draftState = ChatListItemContent.DraftState(draft: draft)

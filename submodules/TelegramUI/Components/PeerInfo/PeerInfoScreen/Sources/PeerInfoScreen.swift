@@ -1635,7 +1635,14 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
             }
             switch key {
             case .back:
-                strongSelf.controller?.dismiss()
+                if let controller = strongSelf.controller {
+                    if let navigationController = controller.navigationController,
+                       navigationController.topViewController === controller {
+                        navigationController.popViewController(animated: true)
+                    } else {
+                        controller.dismiss()
+                    }
+                }
             case .edit:
                 if case let .replyThread(message) = strongSelf.chatLocation {
                     let threadId = message.threadId
@@ -5982,12 +5989,13 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     rightNavigationButtons.append(PeerInfoHeaderNavigationButtonSpec(key: .selectionDone, isForExpandedView: true))
                 }
             }
-            if leftNavigationButtons.isEmpty, let controller = self.controller, let previousItem = controller.previousItem {
-                switch previousItem {
-                case .close, .item:
-                    leftNavigationButtons.append(PeerInfoHeaderNavigationButtonSpec(key: .back, isForExpandedView: false))
-                    leftNavigationButtons.append(PeerInfoHeaderNavigationButtonSpec(key: .back, isForExpandedView: true))
-                }
+            if leftNavigationButtons.isEmpty, !self.isSettings {
+                // Profiles opened from a chat/search result are not guaranteed to
+                // receive NavigationPreviousAction metadata. Keep the back affordance
+                // available in that case as well; the action delegates to the normal
+                // navigation filter and works for both pushed and modal profiles.
+                leftNavigationButtons.append(PeerInfoHeaderNavigationButtonSpec(key: .back, isForExpandedView: false))
+                leftNavigationButtons.append(PeerInfoHeaderNavigationButtonSpec(key: .back, isForExpandedView: true))
             }
             self.headerNode.navigationButtonContainer.update(size: CGSize(width: layout.size.width - layout.safeInsets.left * 2.0, height: navigationBarHeight), presentationData: self.presentationData, leftButtons: leftNavigationButtons, rightButtons: rightNavigationButtons, expandFraction: effectiveAreaExpansionFraction, shouldAnimateIn: animateHeader, transition: transition)
         }

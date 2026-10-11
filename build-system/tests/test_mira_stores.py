@@ -39,6 +39,7 @@ CHAT_HISTORY_NODE = ROOT / "submodules/TelegramUI/Sources/ChatHistoryListNode.sw
 CHAT_INPUT_PANELS = ROOT / "submodules/TelegramUI/Sources/ChatInterfaceStateInputPanels.swift"
 CHAT_CONTROLLER = ROOT / "submodules/TelegramUI/Sources/ChatController.swift"
 CHAT_CONTEXT_MENUS = ROOT / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
+GIFT_BUBBLE = ROOT / "submodules/TelegramUI/Components/Chat/ChatMessageGiftBubbleContentNode/Sources/ChatMessageGiftBubbleContentNode.swift"
 PEER = ROOT / "submodules/Postbox/Sources/Peer.swift"
 SIGNALS = ROOT / "submodules/SSignalKit/SwiftSignalKit/Source"
 
@@ -64,6 +65,10 @@ def static_regressions() -> None:
         raise RuntimeError("local NFT transfers must debit the normalized 25-Star fee")
     if "private func normalizedForStorage(_ gift: MiraFakeGift)" not in gifts_source or "normalized.transferStars = MiraFakeGift.defaultNFTTransferStars" not in gifts_source:
         raise RuntimeError("legacy fake NFT fees must be normalized before persistence")
+    if "self.cache = uniqueGifts.map { self.normalizedForStorage($0) }" not in gifts_source:
+        raise RuntimeError("legacy array gift snapshots must normalize stale transfer fees during migration")
+    if "transferred.isHidden = false" not in gifts_source or "transferred.isSaved = false" not in gifts_source or "transferred.collectionIds = []" not in gifts_source:
+        raise RuntimeError("local NFT transfers must not inherit hidden state or sender collections")
     if "self.upsertAndWait(durableInserted)" not in gifts_source:
         raise RuntimeError("transferred local NFTs must durably persist the recipient-owned copy")
     if "miraFakeStarsLedger.snapshot().entries.reversed().first" not in gifts_source:
@@ -80,6 +85,9 @@ def static_regressions() -> None:
         raise RuntimeError("local NFT source removal must follow the durable Stars debit")
     if 'let transferId = "\\(transferPrefix)\\(recipientValue)"' not in gifts_source or "transferred.id = transferId" not in gifts_source:
         raise RuntimeError("local NFT transfer retry must use one deterministic recipient projection id")
+    gift_bubble = GIFT_BUBBLE.read_text(encoding="utf-8")
+    if "Notification_StarGift_TitleTo(recipient.compactDisplayTitle)" not in gift_bubble:
+        raise RuntimeError("local transfer bubbles must identify the selected recipient")
     gift_collections = STAR_GIFT_COLLECTIONS.read_text(encoding="utf-8")
     if "if collectionId < 0 {" not in gift_collections or "createLocalCollection(ownerPeerId:" not in gift_collections:
         raise RuntimeError("local gift collections must be persisted without a Telegram collection mutation")
@@ -153,6 +161,9 @@ def static_regressions() -> None:
         raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
     if "private var fakeMessageByMessageId: [MessageId: FakeMessageRecord]" not in (ROOT / "submodules/TelegramCore/Sources/State/MiraMessageHistoryStore.swift").read_text(encoding="utf-8"):
         raise RuntimeError("fake-message lookup must use the maintained Postbox id index")
+    history_store = (ROOT / "submodules/TelegramCore/Sources/State/MiraMessageHistoryStore.swift").read_text(encoding="utf-8")
+    if "var persistedRecord = record" not in history_store or "changed.append(persistedRecord)" not in history_store:
+        raise RuntimeError("fake-message upserts must journal the preserved read marker")
     if "chatHistoryNode_localProjectionSettings" not in chat_history_node:
         raise RuntimeError("open chat history must refresh when local projection switches change")
     if "fakeMessagesEnabled ? chatPresentationInterfaceState.renderedPeer?.peer.flatMap" not in chat_input:
@@ -437,6 +448,16 @@ require(persistedLedger.hasEntry(kind: .fakeStarsMessage, relatedId: "zero-in"),
 require(!persistedLedger.recordFakeStarsMessage(id: "negative", peerId: userId(42).toInt64(), amount: -1, outgoing: false, date: 22), "negative Stars message rejected")
 require(!persistedLedger.recordGiftTransfer(id: "negative-fee", peerId: userId(42).toInt64(), fee: -1, date: 23), "negative gift fee rejected")
 require(!persistedLedger.recordGiftConversion(id: "negative-conversion", peerId: userId(42).toInt64(), stars: -1, date: 24), "negative gift conversion rejected")
+let channelPath = root.appendingPathComponent("channel", isDirectory: true)
+try! FileManager.default.createDirectory(at: channelPath, withIntermediateDirectories: true)
+let channelLedger = MiraFakeStarsLedger(basePath: channelPath.path)
+require(channelLedger.setBalance(10, date: 25), "channel ledger initial balance")
+require(channelLedger.adjustChannelStars(id: "post", peerId: userId(42).toInt64(), oldPostStars: 0, newPostStars: 3, oldReactionStars: 0, newReactionStars: 0, date: 26), "local channel post debits Stars")
+require(channelLedger.balance == 7, "local channel post decreases Stars balance")
+require(channelLedger.adjustChannelStars(id: "post", peerId: userId(42).toInt64(), oldPostStars: 3, newPostStars: 5, oldReactionStars: 0, newReactionStars: 0, date: 27), "editing channel post debits only the difference")
+require(channelLedger.balance == 5, "channel post edit keeps the debit delta")
+require(channelLedger.recordChannelReactionStars(id: "reaction", peerId: userId(42).toInt64(), stars: 2, date: 28), "local Stars reaction debits balance")
+require(channelLedger.balance == 3, "local Stars reaction decreases Stars balance")
 
 let record = FakeMessageRecord(id: "m1", messagePeerId: userId(42).toInt64(), text: "hello", date: 1, outgoing: false)
 let media = FakeMessageMedia(kind: .video, resource: "local://clip.mp4", duration: -4, width: -1, stars: -2)
@@ -456,6 +477,7 @@ require(history.setFakeMessageRead(id: "m1", isRead: true), "fake message read m
 waitUntil { history.fakeMessage(id: "m1")?.isRead == true }
 history.addFakeMessage(record)
 require(history.fakeMessages(in: userId(42)).count == 1, "duplicate fake id is ignored")
+require(MiraMessageHistoryStore(basePath: root.path).fakeMessage(id: "m1")?.isRead == true, "duplicate upsert preserves read marker after reload")
 var editedRecord = record
 editedRecord.text = "edited"
 editedRecord.date = 99

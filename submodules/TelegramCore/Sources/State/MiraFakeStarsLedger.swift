@@ -411,15 +411,15 @@ public final class MiraFakeStarsLedger {
         return self.credit(stars, kind: .fakeGiftConversion, relatedId: id, peerId: peerId, date: date, note: "Gift converted to Stars")
     }
 
-    /// Records Stars assigned to a local channel post. The related id is
-    /// stable across editor saves, so replaying a save after a UI interruption
-    /// cannot double-credit the account ledger.
+    /// Records Stars spent on a local channel post. The related id is stable
+    /// across editor saves, so replaying a save after a UI interruption cannot
+    /// double-debit the account ledger.
     @discardableResult
     public func recordChannelPostStars(id: String, peerId: Int64, stars: Int64, date: Int32 = MiraFakeStarsLedger.currentTimestamp()) -> Bool {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeChannelPost, relatedId: id, peerId: peerId, date: date, note: "Channel post Stars")
+        return self.debit(stars, kind: .fakeChannelPost, relatedId: id, peerId: peerId, date: date, note: "Channel post Stars")
     }
 
     /// Applies only the changed part of a local post's Stars total. Each
@@ -427,52 +427,18 @@ public final class MiraFakeStarsLedger {
     /// updates idempotent after a restart.
     @discardableResult
     public func adjustChannelPostStars(id: String, peerId: Int64, oldStars: Int64, newStars: Int64, date: Int32 = MiraFakeStarsLedger.currentTimestamp()) -> Bool {
-        let oldValue = max(0, oldStars)
-        let newValue = max(0, newStars)
-        guard oldValue != newValue else {
-            return true
-        }
-        return self.queue.sync {
-            self.loadIfNeeded()
-            guard !self.readOnly else {
-                return false
-            }
-            let prefix = "\(id):"
-            var currentEffect: Int64 = 0
-            for entry in self.entriesCache where entry.kind == .fakeChannelPost && (entry.relatedId == id || entry.relatedId?.hasPrefix(prefix) == true) {
-                let result = currentEffect.addingReportingOverflow(entry.delta)
-                guard !result.overflow else { return false }
-                currentEffect = result.partialValue
-            }
-            if currentEffect == newValue {
-                return true
-            }
-            guard currentEffect == oldValue else {
-                return false
-            }
-            let deltaResult = newValue.subtractingReportingOverflow(oldValue)
-            guard !deltaResult.overflow else { return false }
-            let delta = deltaResult.partialValue
-            if delta < 0 {
-                guard delta != Int64.min, self.balanceCache >= -delta else { return false }
-            } else {
-                guard self.balanceCache <= Int64.max - delta else { return false }
-            }
-            let nextBalance = self.balanceCache + delta
-            self.balanceCache = nextBalance
-            self.entriesCache.append(MiraFakeStarsLedgerEntry(
-                date: date,
-                delta: delta,
-                balance: nextBalance,
-                kind: .fakeChannelPost,
-                relatedId: "\(id):edit:\(UUID().uuidString)",
-                peerId: peerId,
-                note: "Channel post Stars edit"
-            ))
-            self.persistLocked()
-            self.publishLocked()
-            return true
-        }
+        // Keep the legacy single-counter API on the same transactional path as
+        // the post+reaction editor. This prevents older callers from silently
+        // crediting Stars when the fake channel is configured to charge them.
+        return self.adjustChannelStars(
+            id: id,
+            peerId: peerId,
+            oldPostStars: oldStars,
+            newPostStars: newStars,
+            oldReactionStars: 0,
+            newReactionStars: 0,
+            date: date
+        )
     }
 
     @discardableResult
@@ -480,7 +446,7 @@ public final class MiraFakeStarsLedger {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeChannelReaction, relatedId: id, peerId: peerId, date: date, note: "Channel Stars reactions")
+        return self.debit(stars, kind: .fakeChannelReaction, relatedId: id, peerId: peerId, date: date, note: "Channel Stars reactions")
     }
 
     /// Updates the two independent Stars counters stored on a local channel
@@ -502,12 +468,19 @@ public final class MiraFakeStarsLedger {
 
             func effect(for kind: MiraFakeStarsLedgerEntryKind) -> Int64? {
                 var value: Int64 = 0
-                for entry in self.entriesCache where entry.kind == kind && (entry.relatedId == id || entry.relatedId?.hasPrefix("\(id):") == true) {
+                let matchingEntries = self.entriesCache.filter { $0.kind == kind && ($0.relatedId == id || $0.relatedId?.hasPrefix("\(id):") == true) }
+                for entry in matchingEntries {
                     let result = value.addingReportingOverflow(entry.delta)
                     if result.overflow {
                         return nil
                     }
                     value = result.partialValue
+                }
+                // Older versions credited the account when a local channel
+                // counter increased. Interpret the journal as a positive
+                // counter regardless of which sign convention created it.
+                if let first = matchingEntries.first, first.delta < 0 {
+                    return value == Int64.min ? Int64.max : -value
                 }
                 return value
             }
@@ -515,6 +488,14 @@ public final class MiraFakeStarsLedger {
             guard let storedPost = effect(for: .fakeChannelPost), let storedReaction = effect(for: .fakeChannelReaction) else {
                 return false
             }
+            let firstCounterEntry = self.entriesCache.first(where: {
+                ($0.kind == .fakeChannelPost || $0.kind == .fakeChannelReaction) &&
+                ($0.relatedId == id || $0.relatedId?.hasPrefix("\(id):") == true)
+            })
+            // An empty journal is the normal path for a newly created local
+            // post. Treat it as the current debit model; only an existing
+            // non-negative counter entry identifies the legacy credit model.
+            let usesLegacyCredits = firstCounterEntry.map { $0.delta >= 0 } ?? false
             // Older builds combined post Stars and reaction Stars into one
             // `.fakeChannelPost` total. Recognize that shape on first edit and
             // reclassify it while applying only the net balance delta.
@@ -538,24 +519,36 @@ public final class MiraFakeStarsLedger {
                 return false
             }
             let combinedDelta = combinedResult.partialValue
-            if combinedDelta < 0 {
-                guard combinedDelta != Int64.min, self.balanceCache >= -combinedDelta else {
+            let balanceDelta: Int64
+            if usesLegacyCredits {
+                balanceDelta = combinedDelta
+            } else {
+                balanceDelta = combinedDelta == Int64.min ? Int64.max : -combinedDelta
+            }
+            if balanceDelta < 0 {
+                guard balanceDelta != Int64.min, self.balanceCache >= -balanceDelta else {
                     return false
                 }
-            } else {
-                guard self.balanceCache <= Int64.max - combinedDelta else {
+            } else if balanceDelta > 0 {
+                guard self.balanceCache <= Int64.max - balanceDelta else {
                     return false
                 }
             }
 
-            let nextBalance = self.balanceCache + combinedDelta
+            let nextBalance = self.balanceCache + balanceDelta
             self.balanceCache = nextBalance
-            var entryBalance = self.balanceCache - combinedDelta
+            var entryBalance = self.balanceCache - balanceDelta
             if postDeltaResult.partialValue != 0 {
-                entryBalance += postDeltaResult.partialValue
+                let entryDelta: Int64
+                if usesLegacyCredits {
+                    entryDelta = postDeltaResult.partialValue
+                } else {
+                    entryDelta = postDeltaResult.partialValue == Int64.min ? Int64.max : -postDeltaResult.partialValue
+                }
+                entryBalance += entryDelta
                 self.entriesCache.append(MiraFakeStarsLedgerEntry(
                     date: date,
-                    delta: postDeltaResult.partialValue,
+                    delta: entryDelta,
                     balance: entryBalance,
                     kind: .fakeChannelPost,
                     relatedId: "\(id):edit:post:\(UUID().uuidString)",
@@ -564,10 +557,16 @@ public final class MiraFakeStarsLedger {
                 ))
             }
             if reactionDeltaResult.partialValue != 0 {
-                entryBalance += reactionDeltaResult.partialValue
+                let entryDelta: Int64
+                if usesLegacyCredits {
+                    entryDelta = reactionDeltaResult.partialValue
+                } else {
+                    entryDelta = reactionDeltaResult.partialValue == Int64.min ? Int64.max : -reactionDeltaResult.partialValue
+                }
+                entryBalance += entryDelta
                 self.entriesCache.append(MiraFakeStarsLedgerEntry(
                     date: date,
-                    delta: reactionDeltaResult.partialValue,
+                    delta: entryDelta,
                     balance: entryBalance,
                     kind: .fakeChannelReaction,
                     relatedId: "\(id):edit:reaction:\(UUID().uuidString)",

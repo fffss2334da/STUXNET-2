@@ -2557,7 +2557,10 @@ private final class ChatSendStarsScreenComponent: Component {
                         id: AnyHashable(0),
                         component: AnyComponent(MultilineTextComponent(text: .plain(buttonAttributedString)))
                     ),
-                    isEnabled: !self.isFakeStarsPreview || localStarsReactionEnabled,
+                    isEnabled: !self.isFakeStarsPreview || (
+                        localStarsReactionEnabled &&
+                        (self.balance ?? .zero) >= StarsAmount(value: Int64(self.amount.realValue), nanos: 0)
+                    ),
                     displaysProgress: false,
                     action: { [weak self] in
                         guard let self, let component = self.component else {

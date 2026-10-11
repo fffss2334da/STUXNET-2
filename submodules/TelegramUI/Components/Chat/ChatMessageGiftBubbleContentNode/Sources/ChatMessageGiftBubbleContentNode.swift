@@ -715,8 +715,26 @@ public class ChatMessageGiftBubbleContentNode: ChatMessageBubbleContentNode {
                                     // transfer state attached to this exact
                                     // gift bubble instead of falling back to
                                     // the generic "gifted by" copy.
-                                    title = isSelfGift ? item.presentationData.strings.Notification_StarGift_Purchased_Title : item.presentationData.strings.Notification_StarsGift_TransferYou
-                                    text = isSelfGift ? "" : item.presentationData.strings.Notification_StarsGift_TransferYou
+                                    if isSelfGift {
+                                        title = item.presentationData.strings.Notification_StarGift_Purchased_Title
+                                        text = ""
+                                    } else if item.message.author?.id == item.context.account.peerId,
+                                              let recipient = item.message.peers[item.message.id.peerId].flatMap(EnginePeer.init),
+                                              recipient.id != item.context.account.peerId {
+                                        // Local transfers are inserted directly
+                                        // into the selected recipient chat. The
+                                        // service payload has no server
+                                        // `to_id`, so derive the target from the
+                                        // chat peer instead of rendering the
+                                        // misleading "Unknown user / gift for
+                                        // you" copy used for incomplete server
+                                        // updates.
+                                        title = item.presentationData.strings.Notification_StarGift_TitleTo(recipient.compactDisplayTitle).string
+                                        text = ""
+                                    } else {
+                                        title = item.presentationData.strings.Notification_StarsGift_TransferYou
+                                        text = ""
+                                    }
                                 } else if isStoryEntity {
                                     title = uniqueGift.title
                                 } else if isSelfGift {
