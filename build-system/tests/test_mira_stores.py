@@ -215,7 +215,15 @@ public enum Namespaces {
     }
 }
 public struct MessageId: Hashable { public let peerId: PeerId; public let namespace: Int32; public let id: Int32; public init(peerId: PeerId, namespace: Int32, id: Int32) { self.peerId = peerId; self.namespace = namespace; self.id = id } }
-public struct StarGift: Codable, Equatable { public init() {} }
+public enum ProfileGiftsContext {
+    public enum State {
+        public struct StarGift: Codable, Equatable {
+            public enum Reference: Equatable { case peer(PeerId, Int64) }
+            public var reference: Reference?
+            public init(reference: Reference? = nil) { self.reference = reference }
+        }
+    }
+}
 public enum StarGiftReference { case peer(PeerId, Int64) }
 '''
 
