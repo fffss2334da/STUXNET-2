@@ -737,7 +737,7 @@ private func miraFakeConversationPickerController(context: AccountContext, push:
     }
 
     let signal = combineLatest(context.sharedContext.presentationData, versionPromise.get())
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, MiraFakeConversationPickerArguments)) in
+    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
         currentPresentationData = presentationData
         let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
         let controllerState = ItemListControllerState(
