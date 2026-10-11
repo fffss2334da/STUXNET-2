@@ -43,6 +43,10 @@ def static_regressions() -> None:
         raise RuntimeError("fake gift insertion must only include existing Telegram peers")
     if "defaultNFTTransferStars: Int64 = 25" not in gifts_source:
         raise RuntimeError("NFT transfer fee must have one 25-Star default")
+    if "private func offlineUniqueGift(for entry: MiraFakeGift, account: Account)" not in gifts_source:
+        raise RuntimeError("local NFT entries need an offline Telegram-shaped projection")
+    if "return .single(self.offlineUniqueGift(for: entry, account: account))" not in gifts_source:
+        raise RuntimeError("unique fake gifts must remain visible when catalog resolution is offline")
     if "entry.fromPeerId != nil || entry.caption != nil" in gifts_source:
         raise RuntimeError("fake NFT signatures must not be synthesized from local editor fields")
     if "max(MiraFakeGift.defaultNFTTransferStars, source.transferStars ?? MiraFakeGift.defaultNFTTransferStars)" not in gifts_source:
