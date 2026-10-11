@@ -76,6 +76,10 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
     /// peer remains real and all edits stay in the local projection layer.
     /// `nil` keeps the standalone constructor behaviour used by older files.
     public var attachedPeerId: Int64?
+    /// Additional real Telegram channel peers using the same local role
+    /// projection. `attachedPeerId` remains the first/legacy value so older
+    /// snapshots and callers continue to work unchanged.
+    public var attachedPeerIds: [Int64]?
     public var starsBalance: Int64
     public var posts: [Post]
     public let createdAt: Int32
@@ -95,6 +99,7 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
                 ownerName: String? = nil,
                 ownerUsername: String? = nil,
                 attachedPeerId: Int64? = nil,
+                attachedPeerIds: [Int64]? = nil,
                 starsBalance: Int64 = 0,
                 posts: [Post] = [],
                 createdAt: Int32 = MiraFakeChannel.currentTimestamp(),
@@ -113,6 +118,9 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
         self.ownerName = ownerName
         self.ownerUsername = ownerUsername
         self.attachedPeerId = attachedPeerId
+        var seenPeerIds = Set<Int64>()
+        let normalizedPeerIds = attachedPeerIds?.filter { $0 != 0 }.filter { seenPeerIds.insert($0).inserted } ?? []
+        self.attachedPeerIds = normalizedPeerIds.isEmpty ? nil : normalizedPeerIds
         self.starsBalance = max(0, starsBalance)
         self.posts = posts
         self.createdAt = createdAt
@@ -240,7 +248,7 @@ public final class MiraFakeChannelsStore {
         return self.queue.sync {
             self.loadIfNeeded()
             return self.channelsCache.first(where: {
-                $0.attachedPeerId == peerId.toInt64() && $0.role != .member
+                ($0.attachedPeerId == peerId.toInt64() || $0.attachedPeerIds?.contains(peerId.toInt64()) == true) && $0.role != .member
             })
         }
     }

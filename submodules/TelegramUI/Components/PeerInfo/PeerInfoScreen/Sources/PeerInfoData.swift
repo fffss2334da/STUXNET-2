@@ -1293,6 +1293,12 @@ func peerInfoScreenData(
                     if user.id == context.account.peerId {
                         if let presence = view.peerPresences[userPeerId] as? TelegramUserPresence {
                             return .presence(presence)
+                        } else if let serverTimestamp = MiraCoreGate.shared.serverLastSeen(forAccountPeerId: context.account.peerId), serverTimestamp > 0 {
+                            // The account's own presence can briefly be absent
+                            // while the peer view is refreshing. Keep the last
+                            // server-supplied `wasOnline` value visible instead
+                            // of falling back to a local clock or "Just now".
+                            return .presence(TelegramUserPresence(status: .none, lastActivity: serverTimestamp))
                         } else {
                             return .none
                         }

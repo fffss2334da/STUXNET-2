@@ -116,8 +116,14 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
                     case 9: channel.avatarPath = value.isEmpty ? nil : value
                     case 10: channel.inviteLink = value.isEmpty ? nil : value
                     case 11:
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        channel.attachedPeerId = Int64(trimmed)
+                        let peerIds = value
+                            .split { $0 == "," || $0 == " " || $0 == "\n" || $0 == "\t" }
+                            .compactMap { Int64(String($0)) }
+                            .filter { $0 != 0 }
+                        var seenPeerIds = Set<Int64>()
+                        let uniquePeerIds = peerIds.filter { seenPeerIds.insert($0).inserted }
+                        channel.attachedPeerId = uniquePeerIds.first
+                        channel.attachedPeerIds = uniquePeerIds.isEmpty ? nil : uniquePeerIds
                     default: break
                     }
                     arguments.channel = channel
@@ -234,7 +240,7 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
             .avatar(channel.avatarPath),
             .input(9, "Avatar file path", channel.avatarPath ?? "", "Optional path (advanced)", false),
             .input(10, "Invite link", channel.inviteLink ?? "", "https://t.me/+...", false),
-            .input(11, "Attached Telegram channel ID", channel.attachedPeerId.map(String.init) ?? "", "Optional numeric peer ID", true),
+            .input(11, "Attached Telegram channel IDs", (channel.attachedPeerIds ?? channel.attachedPeerId.map { [$0] } ?? []).map { String($0) }.joined(separator: ", "), "Optional numeric IDs, separated by commas", false),
             .role(channel.role == .owner ? "Owner" : (channel.role == .administrator ? "Administrator" : "Member")),
             .visibility(channel.visibility == .publicChannel ? "Public" : "Private"),
             .posts(channel.posts.count),
