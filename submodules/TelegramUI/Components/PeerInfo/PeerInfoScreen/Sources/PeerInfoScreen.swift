@@ -1148,7 +1148,8 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
         }, presentControllerInCurrent: { [weak self] c, a in
             self?.controller?.present(c, in: .current, with: a)
         }, navigationController: { [weak self] in
-            return self?.controller?.navigationController as? NavigationController
+            return (self?.controller?.navigationController as? NavigationController)
+                ?? self?.context.sharedContext.mainWindow?.viewController as? NavigationController
         }, chatControllerNode: {
             return nil
         }, presentGlobalOverlayController: { _, _ in }, callPeer: { _, _ in
@@ -1642,6 +1643,9 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     } else {
                         controller.dismiss()
                     }
+                } else if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController,
+                          navigationController.topViewController is PeerInfoScreenImpl {
+                    navigationController.popViewController(animated: true)
                 }
             case .edit:
                 if case let .replyThread(message) = strongSelf.chatLocation {
@@ -2923,7 +2927,8 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
     }
     
     func openPeer(peerId: PeerId, navigation: ChatControllerInteractionNavigateToPeer) {
-        guard let navigationController = self.controller?.navigationController as? NavigationController else {
+        guard let navigationController = (self.controller?.navigationController as? NavigationController)
+            ?? self.context.sharedContext.mainWindow?.viewController as? NavigationController else {
             return
         }
         PeerInfoScreenImpl.openPeer(context: self.context, peerId: peerId, navigation: navigation, navigationController: navigationController)

@@ -3553,7 +3553,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
             self?.present(controller, in: .current, with: arguments)
         }, navigationController: { [weak self] in
-            return self?.navigationController as? NavigationController
+            // Chats opened from an inline/overlay stack do not have a direct
+            // UIKit navigationController. Use the same resolver as all other
+            // chat navigation paths so message actions and profile links do
+            // not silently become no-ops.
+            return self?.effectiveNavigationController
         }, chatControllerNode: { [weak self] in
             return self?.chatDisplayNode
         }, presentGlobalOverlayController: { [weak self] controller, arguments in
@@ -11127,7 +11131,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             if let navigationController = self.customNavigationController {
                 return navigationController
             }
-            return nil
+            // A chat can be temporarily detached while the root controller
+            // is switching tabs or replacing an inline stack. The account
+            // root is still the valid destination for push/pop operations.
+            return self.context.sharedContext.mainWindow?.viewController as? NavigationController
         }
     }
     

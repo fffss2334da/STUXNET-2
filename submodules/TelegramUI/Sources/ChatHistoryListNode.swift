@@ -4687,7 +4687,13 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
         if canRead, case let .peer(peerId) = self.chatLocation,
            MiraCoreGate.shared.snapshot(forAccountPeerId: self.context.account.peerId).fakeMessagesEnabled {
             let fakeStore = self.context.account.miraMessageHistoryStore
+            let fakeSettings = MiraCoreGate.shared.snapshot(forAccountPeerId: self.context.account.peerId)
             for record in fakeStore.fakeMessages(in: peerId) where !record.outgoing && !record.isRead {
+                // Hidden Stars projections must not become read merely because
+                // the chat was opened while the Stars switch is disabled.
+                if record.kind == .stars && !fakeSettings.fakeStarsEnabled {
+                    continue
+                }
                 _ = fakeStore.setFakeMessageRead(id: record.id, isRead: true)
             }
         }

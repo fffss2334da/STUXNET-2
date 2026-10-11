@@ -168,6 +168,8 @@ def static_regressions() -> None:
         raise RuntimeError("open chat history must refresh when local projection switches change")
     if "fakeMessagesEnabled ? chatPresentationInterfaceState.renderedPeer?.peer.flatMap" not in chat_input:
         raise RuntimeError("fake channel composer must disappear when fake messages are disabled")
+    if "record.kind == .stars && !fakeSettings.fakeStarsEnabled" not in chat_history_node:
+        raise RuntimeError("hidden fake Stars messages must not be marked read when opening a chat")
     if "immediateMiraSettings.fakeMessagesEnabled" not in chat_controller:
         raise RuntimeError("fake channel actions must be gated by fake messages setting")
     if "miraGeneratedUrlEntities" not in engine or "TextEntitiesMessageAttribute(entities: textEntities)" not in engine:
