@@ -85,12 +85,13 @@ final class CameraDevice {
                     }
                     let subtype = CMFormatDescriptionGetMediaSubType(format.formatDescription)
                     if subtype == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange {
-                        for range in format.videoSupportedFrameRateRanges {
-                            if range.maxFrameRate > 60 {
-                                continue outer
-                            }
+                        // A format whose range extends to 120 FPS can still be
+                        // configured safely at 60 FPS. Reject only formats
+                        // that cannot produce a rate at or below 60.
+                        if format.videoSupportedFrameRateRanges.allSatisfy({ $0.minFrameRate > 60 }) {
+                            continue outer
                         }
-                        
+
                         maxWidth = dimensions.width
                         maxHeight = dimensions.height
                         
@@ -113,20 +114,16 @@ final class CameraDevice {
             if !candidates.isEmpty {
                 var bestFormat: AVCaptureDevice.Format?
     photoOuter: for format in photoCandidates {
-                    for range in format.videoSupportedFrameRateRanges {
-                        if range.maxFrameRate > maxFramerate {
-                            continue photoOuter
-                        }
+                    if format.videoSupportedFrameRateRanges.contains(where: { $0.contains(rate: maxFramerate) }) {
                         bestFormat = format
+                        break photoOuter
                     }
                 }
                 if bestFormat == nil {
              outer: for format in candidates {
-                        for range in format.videoSupportedFrameRateRanges {
-                            if range.maxFrameRate > maxFramerate {
-                                continue outer
-                            }
+                        if format.videoSupportedFrameRateRanges.contains(where: { $0.contains(rate: maxFramerate) }) {
                             bestFormat = format
+                            break outer
                         }
                     }
                 }

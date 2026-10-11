@@ -1919,19 +1919,51 @@ private final class ProfileGiftsContextImpl {
         // entry so a transferred NFT can appear on the recipient's local
         // profile as well. Subscribe for every peer profile; the resolver
         // filters entries by owner and keeps real server profiles untouched.
-        if collectionId == nil {
-            self.fakeGiftsDisposable.set((account.miraFakeGiftsStore.changes
-            |> mapToSignal { entries -> Signal<[ProfileGiftsContext.State.StarGift], NoError> in
-                return account.miraFakeGiftsStore.resolvedProfileGifts(account: account, entries: entries, ownerPeerId: peerId)
+        self.fakeGiftsDisposable.set((account.miraFakeGiftsStore.changes
+        |> mapToSignal { entries -> Signal<[ProfileGiftsContext.State.StarGift], NoError> in
+            let resolved = account.miraFakeGiftsStore.resolvedProfileGifts(
+                account: account,
+                entries: entries,
+                ownerPeerId: peerId,
+                collectionId: collectionId.flatMap { $0 > 0 ? $0 : nil }
+            )
+            guard let collectionId, collectionId < 0 else {
+                return resolved
             }
-            |> deliverOn(self.queue)).start(next: { [weak self] gifts in
-                guard let self else {
-                    return
+            return combineLatest(resolved, account.miraFakeGiftsStore.collectionsChanges)
+            |> map { resolvedGifts, collections -> [ProfileGiftsContext.State.StarGift] in
+                guard let collection = collections.first(where: { $0.id == collectionId && $0.ownerPeerId == peerId.toInt64() }) else {
+                    return []
                 }
-                self.injectedFakeGifts = gifts
-                self.pushState()
-            }))
+                let resolvedByReference = Dictionary(uniqueKeysWithValues: resolvedGifts.compactMap { gift in
+                    gift.reference.map { ($0, gift) }
+                })
+                return collection.gifts.compactMap { storedGift in
+                    guard let reference = storedGift.reference else {
+                        return nil
+                    }
+                    if case let .peer(referencePeerId, savedId) = reference,
+                       referencePeerId == account.peerId,
+                       MiraFakeGift.isLocalSavedId(savedId) {
+                        return resolvedByReference[reference]
+                    }
+                    return storedGift
+                }
+            }
         }
+        |> deliverOn(self.queue)).start(next: { [weak self] gifts in
+            guard let self else {
+                return
+            }
+            self.injectedFakeGifts = gifts
+            if let collectionId = self.collectionId, collectionId < 0 {
+                self.count = 0
+                self.filteredCount = nil
+                self.dataState = .ready(canLoadMore: false, nextOffset: nil)
+                self.filteredDataState = .ready(canLoadMore: false, nextOffset: nil)
+            }
+            self.pushState()
+        }))
 
         self.loadMore()
     }
@@ -1958,6 +1990,17 @@ private final class ProfileGiftsContextImpl {
         let filter = self.filter
         let sorting = self.sorting
         let limit = self.limit
+
+        if let collectionId, collectionId < 0 {
+            self.gifts = []
+            self.filteredGifts = []
+            self.count = 0
+            self.filteredCount = nil
+            self.dataState = .ready(canLoadMore: false, nextOffset: nil)
+            self.filteredDataState = .ready(canLoadMore: false, nextOffset: nil)
+            self.pushState()
+            return
+        }
         
         let isFiltered = self.filter != .All || self.sorting != .date
         if !isFiltered {
@@ -2712,7 +2755,7 @@ private final class ProfileGiftsContextImpl {
         var effectiveCount = useMainData ? self.count : self.filteredCount
         let effectiveDataState = useMainData ? self.dataState : self.filteredDataState
 
-        if self.collectionId == nil, MiraCoreGate.shared.snapshot(forAccountPeerId: self.account.peerId).fakeGiftsEnabled, !self.injectedFakeGifts.isEmpty {
+        if MiraCoreGate.shared.snapshot(forAccountPeerId: self.account.peerId).fakeGiftsEnabled, !self.injectedFakeGifts.isEmpty {
             let existingReferences = Set(stateGifts.compactMap { $0.reference })
             let newFakeGifts = self.injectedFakeGifts.filter { gift in
                 if let reference = gift.reference {
@@ -2721,10 +2764,10 @@ private final class ProfileGiftsContextImpl {
                 return true
             }
             if !newFakeGifts.isEmpty {
-                stateGifts = ProfileGiftsContextImpl.mergedGifts(real: stateGifts, fakes: newFakeGifts)
+                stateGifts = ProfileGiftsContextImpl.mergedGifts(real: stateGifts, fakes: newFakeGifts, sorting: self.sorting)
                 let matchingFakes = newFakeGifts.filter { ProfileGiftsContextImpl.fakeGift($0, matchesFilter: self.filter) }
-                effectiveGifts = ProfileGiftsContextImpl.mergedGifts(real: effectiveGifts, fakes: matchingFakes)
-                effectiveCount = (effectiveCount ?? 0) + Int32(newFakeGifts.count)
+                effectiveGifts = ProfileGiftsContextImpl.mergedGifts(real: effectiveGifts, fakes: matchingFakes, sorting: self.sorting)
+                effectiveCount = (effectiveCount ?? 0) + Int32(clamping: matchingFakes.count)
             }
         }
 
@@ -2741,14 +2784,46 @@ private final class ProfileGiftsContextImpl {
         self.stateValue.set(.single(state))
     }
 
-    private static func mergedGifts(real: [ProfileGiftsContext.State.StarGift], fakes: [ProfileGiftsContext.State.StarGift]) -> [ProfileGiftsContext.State.StarGift] {
+    private static func mergedGifts(real: [ProfileGiftsContext.State.StarGift], fakes: [ProfileGiftsContext.State.StarGift], sorting: ProfileGiftsContext.Sorting) -> [ProfileGiftsContext.State.StarGift] {
         let pinnedReal = real.filter { $0.pinnedToTop }
         let unpinnedReal = real.filter { !$0.pinnedToTop }
         let pinnedFakes = fakes.filter { $0.pinnedToTop }
         let unpinnedFakes = fakes.filter { !$0.pinnedToTop }
         var mergedUnpinned = unpinnedReal + unpinnedFakes
-        mergedUnpinned.sort { $0.date > $1.date }
+        // Telegram's profile context keeps pinned gifts first and applies the
+        // selected server sort to the remaining entries. Apply that same rule
+        // after injecting local gifts so a local item cannot jump to a fixed
+        // position or disappear when the collection is refreshed.
+        mergedUnpinned.sort { lhs, rhs in
+            switch sorting {
+            case .date:
+                if lhs.date != rhs.date {
+                    return lhs.date > rhs.date
+                }
+            case .value:
+                let lhsValue = ProfileGiftsContextImpl.giftSortValue(lhs)
+                let rhsValue = ProfileGiftsContextImpl.giftSortValue(rhs)
+                if lhsValue != rhsValue {
+                    return lhsValue > rhsValue
+                }
+                if lhs.date != rhs.date {
+                    return lhs.date > rhs.date
+                }
+            }
+            let lhsReference = lhs.reference?.stringValue ?? ""
+            let rhsReference = rhs.reference?.stringValue ?? ""
+            return lhsReference < rhsReference
+        }
         return pinnedReal + pinnedFakes + mergedUnpinned
+    }
+
+    private static func giftSortValue(_ gift: ProfileGiftsContext.State.StarGift) -> Int64 {
+        switch gift.gift {
+        case let .generic(value):
+            return value.convertStars
+        case let .unique(value):
+            return value.valueUsdAmount ?? value.valueAmount ?? value.resellAmounts?.first?.amount.value ?? 0
+        }
     }
 
     private static func fakeGift(_ gift: ProfileGiftsContext.State.StarGift, matchesFilter filter: ProfileGiftsContext.Filters) -> Bool {

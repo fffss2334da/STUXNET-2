@@ -400,7 +400,7 @@ public final class MiraFakeStarsLedger {
         guard fee >= 0 else {
             return false
         }
-        return self.debit(fee, kind: .fakeGiftTransfer, relatedId: id, peerId: peerId, date: date, note: "Gift transfer")
+        return self.debit(fee, kind: .fakeGiftTransfer, relatedId: id, peerId: peerId, date: date, note: "Gift transfer to ID (peerId)")
     }
 
     @discardableResult
@@ -408,7 +408,7 @@ public final class MiraFakeStarsLedger {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeGiftConversion, relatedId: id, peerId: peerId, date: date, note: "Gift conversion")
+        return self.credit(stars, kind: .fakeGiftConversion, relatedId: id, peerId: peerId, date: date, note: "Gift converted to Stars")
     }
 
     /// Records Stars assigned to a local channel post. The related id is

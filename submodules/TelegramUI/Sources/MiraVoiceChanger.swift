@@ -227,6 +227,13 @@ public enum MiraVoiceChanger {
         if (effectSamples == nil || effectSamples!.isEmpty), !params.isPitchOnly {
             effectSamples = applyEffects(samples: pcmSamples, params: params.pitchOnlyFallback())
         }
+        // AVAudioEngine is unavailable during some audio-session transitions
+        // (and on a few devices while another recorder owns the session). Keep
+        // the feature functional with a deterministic PCM fallback instead of
+        // silently sending the untouched recording.
+        if effectSamples == nil || effectSamples!.isEmpty {
+            effectSamples = fallbackEffects(samples: pcmSamples, preset: preset)
+        }
         guard let processedSamples = effectSamples, !processedSamples.isEmpty else {
             return nil
         }
@@ -242,6 +249,71 @@ public enum MiraVoiceChanger {
         let duration = Double(processedSamples.count) / sampleRate
         let waveform = makeWaveformBitstream(samples: processedSamples)
         return MiraProcessedVoiceMessage(url: outputURL, duration: duration, waveform: waveform)
+    }
+
+    private static func fallbackEffects(samples: [Int16], preset: Int32) -> [Int16]? {
+        guard !samples.isEmpty, let selectedPreset = MiraVoiceChangerPreset(rawValue: preset), selectedPreset != .off else {
+            return nil
+        }
+
+        let pitchRate: Double
+        switch selectedPreset {
+        case .chipmunk:
+            pitchRate = 1.4
+        case .deep:
+            pitchRate = 0.72
+        case .helium:
+            pitchRate = 1.55
+        case .child:
+            pitchRate = 1.2
+        case .anonymous:
+            pitchRate = 0.82
+        case .anonymousPro, .masked:
+            pitchRate = 1.1
+        case .demon:
+            pitchRate = 0.68
+        default:
+            pitchRate = 1.0
+        }
+        let outputCount = max(1, Int(Double(samples.count) / pitchRate))
+        let echoDelay = Int(sampleRate * 0.18)
+        let reverbDelay = Int(sampleRate * 0.035)
+        var output = [Int16](repeating: 0, count: outputCount)
+        for index in 0 ..< outputCount {
+            let sourcePosition = min(Double(samples.count - 1), Double(index) * pitchRate)
+            let lowerIndex = Int(sourcePosition)
+            let upperIndex = min(samples.count - 1, lowerIndex + 1)
+            let fraction = sourcePosition - Double(lowerIndex)
+            let input = (Double(samples[lowerIndex]) * (1.0 - fraction) + Double(samples[upperIndex]) * fraction) / 32768.0
+            let phase = Double(index % 320) / 320.0 * Double.pi * 2.0
+            // Pitch-down presets can make the output longer than the source.
+            // Delay taps must therefore use a clamped source index instead of
+            // indexing the output position directly.
+            let delayedSourceIndex = Int(sourcePosition) - echoDelay
+            let delayedEcho = delayedSourceIndex >= 0 ? Double(samples[min(samples.count - 1, delayedSourceIndex)]) / 32768.0 : 0.0
+            let reflectionSourceIndex = Int(sourcePosition) - reverbDelay
+            let shortReflection = reflectionSourceIndex >= 0 ? Double(samples[min(samples.count - 1, reflectionSourceIndex)]) / 32768.0 : 0.0
+            var value: Double
+            switch selectedPreset {
+            case .chipmunk, .helium, .child:
+                value = input
+            case .deep, .anonymous:
+                value = input * 0.82
+            case .radio:
+                value = max(-0.55, min(0.55, input * 1.35))
+            case .echo:
+                value = input * 0.78 + delayedEcho * 0.34
+            case .reverb:
+                value = input * 0.8 + shortReflection * 0.22
+            case .robot, .anonymousPro, .demon, .cyber, .masked:
+                value = input * (0.68 + 0.32 * sin(phase))
+                value = (value >= 0.0 ? 1.0 : -1.0) * min(1.0, abs(value) * 1.35)
+            case .off:
+                value = input
+            }
+            output[index] = Int16((max(-1.0, min(1.0, value)) * 32767.0).rounded())
+        }
+        return output
     }
 
     private static func decodeOggOpus(path: String) -> [Int16]? {

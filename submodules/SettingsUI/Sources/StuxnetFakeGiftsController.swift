@@ -11,6 +11,7 @@ import AccountContext
 import LocalizedPeerData
 import OverlayStatusController
 import ItemListDatePickerItem
+import PremiumUI
 
 private func stuxnetFakeGiftTitle(_ gift: MiraFakeGift) -> String {
     if let snapshot = gift.giftSnapshot {
@@ -47,15 +48,18 @@ private func stuxnetFakeGiftDateString(_ timestamp: Int32) -> String {
 }
 
 private func stuxnetFakeGiftSubtitle(_ gift: MiraFakeGift) -> String {
-    let fromPart: String
+    let fromPart: String?
     if let fromName = gift.fromName, !fromName.isEmpty {
         fromPart = fromName
     } else if let fromPeerId = gift.fromPeerId {
         fromPart = "ID \(fromPeerId)"
     } else {
-        fromPart = "Anonymous"
+        fromPart = nil
     }
-    var details = "from \(fromPart) · \(stuxnetFakeGiftDateString(gift.date))"
+    var details = stuxnetFakeGiftDateString(gift.date)
+    if let fromPart {
+        details = "from \(fromPart) · \(details)"
+    }
     if case let .generic(genericGift) = gift.giftSnapshot, genericGift.convertStars > 0 {
         details += " · converts to \(genericGift.convertStars) Stars"
     }
@@ -284,10 +288,6 @@ private struct StuxnetAddFakeGiftState: Equatable {
     var isHidden: Bool = false
     var isSaved: Bool = false
     var showInChat: Bool = true
-    // Telegram's collectible transfer price is 25 Stars. Keep the value
-    // visible in the editor so a newly-created NFT cannot accidentally be
-    // persisted as a free transfer.
-    var transferStarsText: String = "25"
     var isSaving: Bool = false
 }
 
@@ -331,8 +331,7 @@ private enum StuxnetAddFakeGiftEntry: ItemListNodeEntry {
     case hidden(Bool)
     case saved(Bool)
     case showInChat(Bool)
-    case transferStarsInput(String)
-    case footerInfo(String)
+    case preview(String)
     case deleteGift(String)
 
     var section: ItemListSectionId {
@@ -343,7 +342,7 @@ private enum StuxnetAddFakeGiftEntry: ItemListNodeEntry {
             return StuxnetAddFakeGiftSection.gift.rawValue
         case .fromHeader, .fromInput, .fromPicker:
             return StuxnetAddFakeGiftSection.from.rawValue
-        case .detailsHeader, .captionInput, .dateRow, .hidden, .saved, .showInChat, .transferStarsInput, .footerInfo:
+        case .detailsHeader, .captionInput, .dateRow, .hidden, .saved, .showInChat, .preview:
             return StuxnetAddFakeGiftSection.details.rawValue
         case .deleteGift:
             return StuxnetAddFakeGiftSection.delete.rawValue
@@ -382,12 +381,10 @@ private enum StuxnetAddFakeGiftEntry: ItemListNodeEntry {
             return 13
         case .showInChat:
             return 14
-        case .transferStarsInput:
+        case .preview:
             return 15
-        case .footerInfo:
-            return 16
         case .deleteGift:
-            return 17
+            return 16
         }
     }
 
@@ -466,13 +463,7 @@ private enum StuxnetAddFakeGiftEntry: ItemListNodeEntry {
                     state.showInChat = value
                 }
             })
-        case let .transferStarsInput(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "NFT transfer fee (Stars)"), text: text, placeholder: "0", type: .number, sectionId: self.section, textUpdated: { value in
-                arguments.updateState { state in
-                    state.transferStarsText = value
-                }
-            }, action: {})
-        case let .footerInfo(text):
+        case let .preview(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .deleteGift(title):
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: {
@@ -498,9 +489,6 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
         state.isHidden = existingGift.isHidden
         state.isSaved = existingGift.isSaved
         state.showInChat = existingGift.showInChat
-        state.transferStarsText = existingGift.isUnique
-            ? String(max(MiraFakeGift.defaultNFTTransferStars, existingGift.transferStars ?? MiraFakeGift.defaultNFTTransferStars))
-            : String(MiraFakeGift.defaultNFTTransferStars)
         initialState = state
     } else {
         initialState = StuxnetAddFakeGiftState()
@@ -637,7 +625,7 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
             showInChat: state.showInChat,
             transferStars: state.kind == .regular
                 ? nil
-                : max(MiraFakeGift.defaultNFTTransferStars, Int64(state.transferStarsText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? MiraFakeGift.defaultNFTTransferStars)
+                : MiraFakeGift.defaultNFTTransferStars
         )
         if let senderId = state.selectedSenderId {
             gift.fromPeerId = senderId.toInt64()
@@ -790,10 +778,20 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
         entries.append(.hidden(state.isHidden))
         entries.append(.saved(state.isSaved))
         entries.append(.showInChat(state.showInChat))
-        if state.kind != .regular {
-            entries.append(.transferStarsInput(state.transferStarsText))
+        let previewTitle: String
+        if state.kind == .regular {
+            previewTitle = state.selectedGift?.title ?? "Gift not selected"
+        } else {
+            let slug = stuxnetNormalizedGiftSlug(state.slugText)
+            previewTitle = slug.isEmpty ? "NFT link not entered" : "NFT · " + slug
         }
-        entries.append(.footerInfo("NFT transfers use Telegram's 25 Stars fee and appear in Stars history."))
+        let sender = state.selectedSenderName ?? state.fromText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caption = state.captionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let captionText = caption.isEmpty ? "No caption" : caption
+        let transferFee = MiraFakeGift.defaultNFTTransferStars
+        let feeText = state.kind == .regular ? "No transfer fee" : "Transfer fee · " + String(transferFee) + " Stars"
+        let senderLine = sender.isEmpty ? "" : "Gifted by \(sender)\n"
+        entries.append(.preview("Preview\n\(previewTitle)\n\(senderLine)\(captionText)\n\(state.datePreset.title) · \(feeText)\n\(state.showInChat ? "Shown in chat" : "Profile only")"))
 
         if existingGift != nil {
             entries.append(.deleteGift("Delete Gift"))
@@ -922,7 +920,7 @@ private enum StuxnetFakeGiftPickerEntry: ItemListNodeEntry {
         let arguments = arguments as! StuxnetFakeGiftPickerArguments
         switch self {
         case let .gift(_, gift, isSelected):
-            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass, title: gift.title ?? "Gift #\(gift.id)", subtitle: "★ \(gift.price)", style: .right, checked: isSelected, zeroSeparatorInsets: false, sectionId: self.section, action: {
+            return GiftOptionItem(presentationData: presentationData, systemStyle: .glass, context: arguments.context, title: gift.title ?? "Gift #\(gift.id)", subtitle: "Telegram gift", label: .generic("★ \(gift.price)"), isSelected: isSelected, stars: gift.price, sectionId: self.section, action: {
                 arguments.select(gift)
             })
         case let .loading(text):

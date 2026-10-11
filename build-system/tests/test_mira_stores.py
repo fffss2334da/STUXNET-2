@@ -28,6 +28,11 @@ ENGINE_MESSAGES = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/Message
 REMOVE_OPERATIONS = ROOT / "submodules/TelegramCore/Sources/State/ManagedCloudChatRemoveMessagesOperations.swift"
 CHANNELS = ROOT / "submodules/TelegramCore/Sources/State/MiraFakeChannelsStore.swift"
 FAKE_MESSAGE_UI = ROOT / "submodules/TelegramUI/Sources/MiraFakeMessageController.swift"
+STAR_GIFTS = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/Payments/StarGifts.swift"
+STAR_GIFT_COLLECTIONS = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/Payments/StarGiftsCollections.swift"
+STARS = ROOT / "submodules/TelegramCore/Sources/TelegramEngine/Payments/Stars.swift"
+STARS_STATS_UI = ROOT / "submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsStatisticsScreen.swift"
+STARS_LIST_UI = ROOT / "submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsListPanelComponent.swift"
 PEER = ROOT / "submodules/Postbox/Sources/Peer.swift"
 SIGNALS = ROOT / "submodules/SSignalKit/SwiftSignalKit/Source"
 
@@ -51,6 +56,8 @@ def static_regressions() -> None:
         raise RuntimeError("fake NFT signatures must not be synthesized from local editor fields")
     if "max(MiraFakeGift.defaultNFTTransferStars, source.transferStars ?? MiraFakeGift.defaultNFTTransferStars)" not in gifts_source:
         raise RuntimeError("local NFT transfers must debit the normalized 25-Star fee")
+    if "private func normalizedForStorage(_ gift: MiraFakeGift)" not in gifts_source or "normalized.transferStars = MiraFakeGift.defaultNFTTransferStars" not in gifts_source:
+        raise RuntimeError("legacy fake NFT fees must be normalized before persistence")
     if "self.upsertAndWait(durableInserted)" not in gifts_source:
         raise RuntimeError("transferred local NFTs must durably persist the recipient-owned copy")
     if "miraFakeStarsLedger.snapshot().entries.reversed().first" not in gifts_source:
@@ -67,6 +74,34 @@ def static_regressions() -> None:
         raise RuntimeError("local NFT source removal must follow the durable Stars debit")
     if 'let transferId = "\\(transferPrefix)\\(recipientValue)"' not in gifts_source or "transferred.id = transferId" not in gifts_source:
         raise RuntimeError("local NFT transfer retry must use one deterministic recipient projection id")
+    gift_collections = STAR_GIFT_COLLECTIONS.read_text(encoding="utf-8")
+    if "if collectionId < 0 {" not in gift_collections or "createLocalCollection(ownerPeerId:" not in gift_collections:
+        raise RuntimeError("local gift collections must be persisted without a Telegram collection mutation")
+    if "localGifts = gifts.filter" not in gift_collections or "remoteActions.append(.addGifts(remoteGifts))" not in gift_collections:
+        raise RuntimeError("collection updates must separate local and Telegram gift references")
+    if "self.account.miraFakeGiftsStore.collectionsChanges" not in gift_collections:
+        raise RuntimeError("local gift collections must refresh the Telegram-shaped collection list")
+    star_gifts = STAR_GIFTS.read_text(encoding="utf-8")
+    if "effectiveCount = (effectiveCount ?? 0) + Int32(clamping: matchingFakes.count)" not in star_gifts:
+        raise RuntimeError("gift counts must include only fake gifts matching the active filter")
+    if "let lhsReference = lhs.reference?.stringValue ?? \"\"" not in star_gifts:
+        raise RuntimeError("gift sorting must have a deterministic reference tie-breaker")
+    stars = STARS.read_text(encoding="utf-8")
+    if "account.miraFakeStarsLedger.changes" not in stars or "private func localLedgerTransactions()" not in stars:
+        raise RuntimeError("Stars history must merge account-local ledger entries")
+    if "snapshot(forAccountPeerId: self.account.peerId).fakeStarsEnabled" not in stars:
+        raise RuntimeError("Stars history must fall back to Telegram when local Stars are disabled")
+    if "changes(forAccountPeerId: account.peerId)" not in stars:
+        raise RuntimeError("Stars history must refresh when the local Stars switch changes")
+    if 'title = "Gift transfer fee"' in stars or 'title = "Paid message"' in stars:
+        raise RuntimeError("local Stars transaction titles must come from native Telegram rendering")
+    stats_ui = STARS_STATS_UI.read_text(encoding="utf-8")
+    if "private func localStarsGraph(_ snapshot: MiraFakeStarsLedgerSnapshot" not in stats_ui:
+        raise RuntimeError("local Stars statistics must use a graph built from the local ledger")
+    if "actionIsEnabled: effectiveFakeBalance == nil" not in stats_ui:
+        raise RuntimeError("local Stars projections must not expose a server withdrawal action")
+    if "itemSubtitle = item.description" not in STARS_LIST_UI.read_text(encoding="utf-8"):
+        raise RuntimeError("Stars history must not inject a generic fake/local subtitle")
     scheduled_branch = remove_operations.split("if isScheduled {", 1)[1].split("} else if isQuickReply", 1)[0]
     if "|> retryRequest" not in scheduled_branch:
         raise RuntimeError("scheduled-message deletion must retry until the RPC succeeds")
@@ -75,6 +110,11 @@ def static_regressions() -> None:
     fake_message_ui = FAKE_MESSAGE_UI.read_text(encoding="utf-8")
     if "var datePreset: Int = 0" not in fake_message_ui or '("Now", nil)' not in fake_message_ui:
         raise RuntimeError("new fake messages must default to the actual current date")
+    conversation_picker = fake_message_ui.split("private func miraFakeConversationPickerController", 1)[1].split("private enum MiraFakeMessagesListEntry", 1)[0]
+    chat_index = conversation_picker.find("push(context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId)")
+    editor_index = conversation_picker.find("push(miraFakeMessageController(context: context, peerId: peerId))")
+    if chat_index < 0 or editor_index <= chat_index:
+        raise RuntimeError("selecting a Telegram user must open that chat and its message editor in the same peer")
     peer_info = (ROOT / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift").read_text(encoding="utf-8")
     presence_gate = (ROOT / "submodules/TelegramCore/Sources/State/MiraCoreGate.swift").read_text(encoding="utf-8")
     presence_updates = (ROOT / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift").read_text(encoding="utf-8")

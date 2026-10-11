@@ -22,6 +22,7 @@ public struct MiraCoreGateSnapshot: Equatable {
     public var filterZalgo: Bool = false
     public var isGhostActive: Bool = false
     public var fakeGiftsEnabled: Bool = false
+    public var fakeStarsEnabled: Bool = false
     public var voiceChangerEnabled: Bool = false
     public var voiceChangerPreset: Int32 = 0
     
@@ -34,6 +35,8 @@ public final class MiraCoreGate {
     
     private let value = Atomic<MiraCoreGateSnapshot>(value: MiraCoreGateSnapshot())
     private let accountValues = Atomic<[PeerId: MiraCoreGateSnapshot]>(value: [:])
+    private let valuePromise = ValuePromise<MiraCoreGateSnapshot>(MiraCoreGateSnapshot(), ignoreRepeated: true)
+    private let accountValuesPromise = ValuePromise<[PeerId: MiraCoreGateSnapshot]>([:], ignoreRepeated: true)
     // Telegram does not keep the account's own status in the shared peer
     // presence map. Keep the last server supplied `wasOnline` timestamp in a
     // separate account-scoped cache so local presence packets cannot replace
@@ -46,6 +49,7 @@ public final class MiraCoreGate {
     
     public func apply(_ snapshot: MiraCoreGateSnapshot) {
         let _ = self.value.swap(snapshot)
+        self.valuePromise.set(snapshot)
     }
 
     /// Applies a snapshot for one Telegram account. The legacy global snapshot
@@ -56,12 +60,14 @@ public final class MiraCoreGate {
             values[accountPeerId] = snapshot
             return values
         }
+        self.accountValuesPromise.set(self.accountValues.with { $0 })
     }
 
     /// Replaces the active account set so logged-out accounts cannot leave a
     /// stale override behind for a later login.
     public func replaceAccountSnapshots(_ snapshots: [PeerId: MiraCoreGateSnapshot]) {
         let _ = self.accountValues.swap(snapshots)
+        self.accountValuesPromise.set(snapshots)
         let activeAccountIds = Set(snapshots.keys)
         let _ = self.serverLastSeenValues.modify { values in
             values.filter { activeAccountIds.contains($0.key) }
@@ -95,6 +101,13 @@ public final class MiraCoreGate {
         }
         return self.accountValues.with { values in
             return values[accountPeerId] ?? self.snapshot
+        }
+    }
+
+    public func changes(forAccountPeerId accountPeerId: PeerId) -> Signal<MiraCoreGateSnapshot, NoError> {
+        return combineLatest(self.valuePromise.get(), self.accountValuesPromise.get())
+        |> map { global, accounts in
+            return accounts[accountPeerId] ?? global
         }
     }
     

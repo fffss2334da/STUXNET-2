@@ -60,7 +60,7 @@ final class CameraDeviceContext {
         self.output = CameraOutput(exclusive: exclusive, ciContext: ciContext, colorSpace: colorSpace, use32BGRA: isRoundVideo)
     }
     
-    func configure(position: Camera.Position, previewView: CameraSimplePreviewView?, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, switchAudio: Bool = true) {
+    func configure(position: Camera.Position, previewView: CameraSimplePreviewView?, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, preferredFrameRate: Double? = nil, switchAudio: Bool = true) {
         guard let session = self.session else {
             return
         }
@@ -68,7 +68,7 @@ final class CameraDeviceContext {
         self.previewView = previewView
                 
         self.device.configure(for: session, position: position, dual: !self.exclusive || self.additional, switchAudio: switchAudio)
-        self.device.configureDeviceFormat(maxDimensions: self.maxDimensions(additional: self.additional, preferWide: preferWide), maxFramerate: self.preferredMaxFrameRate(useLower: preferLowerFramerate))
+        self.device.configureDeviceFormat(maxDimensions: self.maxDimensions(additional: self.additional, preferWide: preferWide), maxFramerate: preferredFrameRate ?? self.preferredMaxFrameRate(useLower: preferLowerFramerate))
         self.input.configure(for: session, device: self.device, audio: audio && switchAudio)
         self.output.configure(for: session, device: self.device, input: self.input, previewView: previewView, audio: audio && switchAudio, photo: photo, metadata: metadata)
         
@@ -281,7 +281,7 @@ private final class CameraContext {
                 let preferWide = self.initialConfiguration.preferWide || isRoundVideo
                 let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || isRoundVideo
                 
-                mainDeviceContext.configure(position: targetPosition, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate, switchAudio: !isRoundVideo)
+                mainDeviceContext.configure(position: targetPosition, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate, preferredFrameRate: self.initialConfiguration.preferredFrameRate, switchAudio: !isRoundVideo)
                 if isRoundVideo {
                     mainDeviceContext.output.markPositionChange(position: targetPosition)
                 }
@@ -305,7 +305,7 @@ private final class CameraContext {
             let preferWide = self.initialConfiguration.preferWide || (self.positionValue == .front && self.initialConfiguration.isRoundVideo)
             let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || self.initialConfiguration.isRoundVideo
             
-            self.mainDeviceContext?.configure(position: position, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate)
+            self.mainDeviceContext?.configure(position: position, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate, preferredFrameRate: self.initialConfiguration.preferredFrameRate)
                         
             self.queue.after(0.5) {
                 self.modeChange = .none
@@ -332,10 +332,10 @@ private final class CameraContext {
             self.configure {
                 self.mainDeviceContext?.invalidate()
                 self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: false, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
-                self.mainDeviceContext?.configure(position: .back, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata)
+                self.mainDeviceContext?.configure(position: .back, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferredFrameRate: self.initialConfiguration.preferredFrameRate)
             
                 self.additionalDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: true, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
-                self.additionalDeviceContext?.configure(position: .front, previewView: self.secondaryPreviewView, audio: false, photo: true, metadata: false)
+                self.additionalDeviceContext?.configure(position: .front, previewView: self.secondaryPreviewView, audio: false, photo: true, metadata: false, preferredFrameRate: self.initialConfiguration.preferredFrameRate)
             }
             self.mainDeviceContext?.output.processSampleBuffer = { [weak self] sampleBuffer, pixelBuffer, connection in
                 guard let self, let mainDeviceContext = self.mainDeviceContext else {
@@ -383,7 +383,7 @@ private final class CameraContext {
                 let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || self.initialConfiguration.isRoundVideo
                 
                 self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: true, additional: false, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
-                self.mainDeviceContext?.configure(position: self.positionValue, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate)
+                self.mainDeviceContext?.configure(position: self.positionValue, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate, preferredFrameRate: self.initialConfiguration.preferredFrameRate)
             }
             self.mainDeviceContext?.output.processSampleBuffer = { [weak self] sampleBuffer, pixelBuffer, connection in
                 guard let self, let mainDeviceContext = self.mainDeviceContext else {
@@ -750,8 +750,9 @@ public final class Camera {
         let preferLowerFramerate: Bool
         let reportAudioLevel: Bool
         let isRoundVideo: Bool
+        let preferredFrameRate: Double?
         
-        public init(preset: Preset, position: Position, isDualEnabled: Bool = false, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, reportAudioLevel: Bool = false, isRoundVideo: Bool = false) {
+        public init(preset: Preset, position: Position, isDualEnabled: Bool = false, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, reportAudioLevel: Bool = false, isRoundVideo: Bool = false, preferredFrameRate: Double? = nil) {
             self.preset = preset
             self.position = position
             self.isDualEnabled = isDualEnabled
@@ -762,6 +763,7 @@ public final class Camera {
             self.preferLowerFramerate = preferLowerFramerate
             self.reportAudioLevel = reportAudioLevel
             self.isRoundVideo = isRoundVideo
+            self.preferredFrameRate = preferredFrameRate
         }
     }
     

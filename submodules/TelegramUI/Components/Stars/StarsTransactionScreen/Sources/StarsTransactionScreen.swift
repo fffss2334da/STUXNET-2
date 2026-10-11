@@ -488,6 +488,10 @@ private final class StarsTransactionSheetContent: CombinedComponent {
                     date = transaction.date
                     isPostsSearch = true
                 } else {
+                    if transaction.flags.contains(.isPaidMessage) {
+                        isPaidMessage = true
+                        titleText = strings.Stars_Transaction_PaidMessage(transaction.paidMessageCount ?? 1)
+                    } else {
                     switch transaction.peer {
                     case let .peer(peer):
                         if let months = transaction.premiumGiftMonths {
@@ -552,6 +556,7 @@ private final class StarsTransactionSheetContent: CombinedComponent {
                         titleText = strings.Stars_Transaction_TelegramBotApi_Title
                     case .unsupported:
                         titleText = transaction.title ?? strings.Stars_Transaction_Unsupported_Title
+                    }
                     }
                     
                     if let floodskipNumber = transaction.floodskipNumber {

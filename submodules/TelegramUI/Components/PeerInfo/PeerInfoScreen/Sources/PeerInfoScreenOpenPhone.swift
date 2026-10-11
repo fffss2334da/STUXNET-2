@@ -32,8 +32,6 @@ extension PeerInfoScreenNode {
                 if let initialData {
                     self.view.endEditing(true)
                     self.controller?.push(self.context.sharedContext.makeCollectibleItemInfoScreen(context: self.context, initialData: initialData))
-                } else {
-                    self.context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: "https://fragment.com/numbers", forceExternal: true, presentationData: self.presentationData, navigationController: nil, dismissInput: {})
                 }
             })
             
@@ -166,7 +164,10 @@ extension PeerInfoScreenNode {
                             self.view.endEditing(true)
                             self.controller?.push(self.context.sharedContext.makeCollectibleItemInfoScreen(context: self.context, initialData: initialData))
                         } else {
-                            self.context.sharedContext.openExternalUrl(context: strongSelf.context, urlContext: .generic, url: "https://fragment.com/numbers", forceExternal: true, presentationData: self.presentationData, navigationController: nil, dismissInput: {})
+                            // The collectible lookup is account/server scoped. A
+                            // missing result must stay inside Telegram instead
+                            // of unexpectedly sending the user to Fragment.
+                            copyAction()
                         }
                     })
                 })

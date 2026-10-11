@@ -167,9 +167,13 @@ public enum MiraSocialVideoQuality: Int32, Codable, CaseIterable, Equatable {
     case p1080 = 1080
 
     public var title: String {
+        return self.title(isRussian: false)
+    }
+
+    public func title(isRussian: Bool) -> String {
         switch self {
         case .source:
-            return "Source"
+            return isRussian ? "Исходное" : "Source"
         case .p720:
             return "720p"
         case .p1080:
@@ -179,22 +183,20 @@ public enum MiraSocialVideoQuality: Int32, Codable, CaseIterable, Equatable {
 }
 
 public enum MiraSocialVideoDestination: Int32, Codable, CaseIterable, Equatable {
-    /// Resolve the link locally and enqueue the resulting media in the chat
-    /// where the link was sent. The source URL is never persisted as a file
-    /// in the user's Files or Photos library by this mode.
     case files = 0
-    /// Legacy destinations are retained so existing settings decode safely.
     case photos = 1
     case chat = 2
 
-    public var title: String {
+    public static let selectionOrder: [MiraSocialVideoDestination] = [.chat, .files, .photos]
+
+    public func title(isRussian: Bool) -> String {
         switch self {
         case .chat:
-            return "Send to current chat"
+            return isRussian ? "Отправить в этот чат" : "Send to current chat"
         case .files:
-            return "Files"
+            return isRussian ? "Файлы" : "Files"
         case .photos:
-            return "Photos"
+            return isRussian ? "Фото" : "Photos"
         }
     }
 }
@@ -248,10 +250,10 @@ public struct MiraSocialVideoSettings: Codable, Equatable {
         let rawQuality = try container.decodeIfPresent(Int32.self, forKey: "quality") ?? MiraSocialVideoQuality.source.rawValue
         self.quality = MiraSocialVideoQuality(rawValue: rawQuality) ?? .source
         self.confirmBeforeDownload = try container.decodeIfPresent(Bool.self, forKey: "confirmBeforeDownload") ?? true
-        // Video links always resolve into the chat where they were sent. Older
-        // releases persisted export destinations; reading them as `.chat`
-        // prevents a legacy preference from writing to Files or Photos.
-        self.destination = .chat
+        // Keep the selected destination for settings round trips. Download
+        // call sites apply it only after the user enables this feature.
+        let rawDestination = try container.decodeIfPresent(Int32.self, forKey: "destination") ?? MiraSocialVideoDestination.chat.rawValue
+        self.destination = MiraSocialVideoDestination(rawValue: rawDestination) ?? .chat
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -261,7 +263,8 @@ public struct MiraSocialVideoSettings: Codable, Equatable {
         try container.encode(self.wifiOnly, forKey: "wifiOnly")
         try container.encode(self.quality.rawValue, forKey: "quality")
         try container.encode(self.confirmBeforeDownload, forKey: "confirmBeforeDownload")
-        try container.encode(MiraSocialVideoDestination.chat.rawValue, forKey: "destination")
+        // Preserve the selected destination across app restarts.
+        try container.encode(self.destination.rawValue, forKey: "destination")
     }
 }
 
@@ -429,6 +432,8 @@ public struct MiraLocalPeerOverride: Codable, Equatable {
 }
 
 public struct MiraSettings: Codable, Equatable {
+    public static let defaultVoiceChangerPreset: Int32 = 3
+
     public var ghost: [String: MiraGhostSettings]
     /// Account-scoped Ghost Mode overrides. Keys use the account's stable peer id
     /// (`account:<peerId>`); the legacy `ghost` dictionary remains the fallback
@@ -469,6 +474,10 @@ public struct MiraSettings: Codable, Equatable {
     public var voiceChangerEnabled: Bool
     public var voiceChangerPreset: Int32
     public var videoMessagesUseBackCamera: Bool
+    /// Requests the highest available capture rate for round video messages.
+    /// The camera clamps this to the device's supported rate (60 FPS when
+    /// available, otherwise the closest supported rate).
+    public var videoMessagesUse60Fps: Bool
     public var showLocalOnline: Bool
     public var showRealLastSeen: Bool
     public var localMessageEditEnabled: Bool
@@ -497,31 +506,6 @@ public struct MiraSettings: Codable, Equatable {
         return self.localPremium || self.fakePremiumSince
     }
 
-    /// Telegram sends the authoritative level with the profile data. Fake
-    /// profiles do not have that server value, so derive a deterministic level
-    /// from the entered Star total in one place instead of exposing a second,
-    /// contradictory setting. The thresholds are monotonic and saturate at
-    /// the range accepted by the profile badge renderer.
-    public static func starRatingLevel(forStars stars: Int64) -> Int32 {
-        guard stars > 0 else {
-            return 0
-        }
-        var level: Int32 = 0
-        var threshold: Int64 = 1_000
-        while level < 100 && stars >= threshold {
-            level += 1
-            if threshold > Int64.max / 2 {
-                break
-            }
-            threshold *= 2
-        }
-        return level
-    }
-
-    public var effectiveFakeRatingLevel: Int32 {
-        return MiraSettings.starRatingLevel(forStars: self.fakeRatingValue)
-    }
-    
     public init(
         ghost: [String: MiraGhostSettings] = [:],
         ghostByAccount: [String: MiraGhostSettings] = [:],
@@ -544,13 +528,14 @@ public struct MiraSettings: Codable, Equatable {
         semiTransparentDeletedMessages: Bool = false,
         disableAds: Bool = true,
         disableStories: Bool = false,
-        showPeerId: Bool = false,
+        showPeerId: Bool = true,
         filterZalgo: Bool = false,
         streamerMode: Bool = false,
         screenshotEvasion: Bool = false,
         voiceChangerEnabled: Bool = false,
         voiceChangerPreset: Int32 = 0,
         videoMessagesUseBackCamera: Bool = false,
+        videoMessagesUse60Fps: Bool = false,
         showLocalOnline: Bool = true,
         showRealLastSeen: Bool = false,
         localMessageEditEnabled: Bool = true,
@@ -599,6 +584,7 @@ public struct MiraSettings: Codable, Equatable {
         self.voiceChangerEnabled = voiceChangerEnabled
         self.voiceChangerPreset = voiceChangerPreset
         self.videoMessagesUseBackCamera = videoMessagesUseBackCamera
+        self.videoMessagesUse60Fps = videoMessagesUse60Fps
         self.showLocalOnline = showLocalOnline
         self.showRealLastSeen = showRealLastSeen
         self.localMessageEditEnabled = localMessageEditEnabled
@@ -699,14 +685,19 @@ public struct MiraSettings: Codable, Equatable {
         self.semiTransparentDeletedMessages = try container.decodeIfPresent(Bool.self, forKey: "semiTransparentDeletedMessages") ?? false
         self.disableAds = try container.decodeIfPresent(Bool.self, forKey: "disableAds") ?? true
         self.disableStories = try container.decodeIfPresent(Bool.self, forKey: "disableStories") ?? false
-        self.showPeerId = try container.decodeIfPresent(Bool.self, forKey: "showPeerId") ?? false
+        self.showPeerId = try container.decodeIfPresent(Bool.self, forKey: "showPeerId") ?? true
         self.filterZalgo = try container.decodeIfPresent(Bool.self, forKey: "filterZalgo") ?? false
         self.streamerMode = try container.decodeIfPresent(Bool.self, forKey: "streamerMode") ?? false
         self.screenshotEvasion = try container.decodeIfPresent(Bool.self, forKey: "screenshotEvasion") ?? false
         self.voiceChangerEnabled = try container.decodeIfPresent(Bool.self, forKey: "voiceChangerEnabled") ?? false
+        let hasStoredVoiceChangerPreset = container.contains(StringCodingKey("voiceChangerPreset"))
         let decodedVoiceChangerPreset = try container.decodeIfPresent(Int32.self, forKey: "voiceChangerPreset") ?? 0
-        self.voiceChangerPreset = (0 ... 13).contains(decodedVoiceChangerPreset) ? decodedVoiceChangerPreset : 0
+        let normalizedVoiceChangerPreset = (0 ... 13).contains(decodedVoiceChangerPreset) ? decodedVoiceChangerPreset : 0
+        // Preserve an explicit `.off` value during Codable round trips. Only
+        // old records that never stored a preset receive the enabled default.
+        self.voiceChangerPreset = self.voiceChangerEnabled && !hasStoredVoiceChangerPreset && normalizedVoiceChangerPreset == 0 ? MiraSettings.defaultVoiceChangerPreset : normalizedVoiceChangerPreset
         self.videoMessagesUseBackCamera = try container.decodeIfPresent(Bool.self, forKey: "videoMessagesUseBackCamera") ?? false
+        self.videoMessagesUse60Fps = try container.decodeIfPresent(Bool.self, forKey: "videoMessagesUse60Fps") ?? false
         self.showLocalOnline = try container.decodeIfPresent(Bool.self, forKey: "showLocalOnline") ?? true
         self.showRealLastSeen = try container.decodeIfPresent(Bool.self, forKey: "showRealLastSeen") ?? false
         self.localMessageEditEnabled = try container.decodeIfPresent(Bool.self, forKey: "localMessageEditEnabled") ?? true
@@ -759,6 +750,7 @@ public struct MiraSettings: Codable, Equatable {
         try container.encode(self.voiceChangerEnabled, forKey: "voiceChangerEnabled")
         try container.encode(self.voiceChangerPreset, forKey: "voiceChangerPreset")
         try container.encode(self.videoMessagesUseBackCamera, forKey: "videoMessagesUseBackCamera")
+        try container.encode(self.videoMessagesUse60Fps, forKey: "videoMessagesUse60Fps")
         try container.encode(self.showLocalOnline, forKey: "showLocalOnline")
         try container.encode(self.showRealLastSeen, forKey: "showRealLastSeen")
         try container.encode(self.localMessageEditEnabled, forKey: "localMessageEditEnabled")

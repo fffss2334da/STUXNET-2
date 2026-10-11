@@ -55,12 +55,16 @@ private final class MiraFakeMessageState {
 }
 
 private final class MiraFakeMessageControllerArguments {
+    let context: AccountContext
     let state: MiraFakeMessageState
     let updated: () -> Void
+    let present: (ViewController) -> Void
 
-    init(state: MiraFakeMessageState, updated: @escaping () -> Void) {
+    init(context: AccountContext, state: MiraFakeMessageState, updated: @escaping () -> Void, present: @escaping (ViewController) -> Void) {
+        self.context = context
         self.state = state
         self.updated = updated
+        self.present = present
     }
 }
 
@@ -177,13 +181,23 @@ private enum MiraFakeMessageEntry: ItemListNodeEntry {
             })
         case let .kind(kind):
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Content type", label: miraFakeMessageKindTitle(kind), sectionId: self.section, style: .blocks, action: {
+                let presentationData = arguments.context.sharedContext.currentPresentationData.with { $0 }
+                let sheet = ActionSheetController(presentationData: presentationData)
                 let kinds: [FakeMessageKind] = [.text, .photo, .video, .file, .audio, .voice, .sticker, .service, .stars]
-                if let index = kinds.firstIndex(of: arguments.state.kind) {
-                    arguments.state.kind = kinds[(index + 1) % kinds.count]
-                } else {
-                    arguments.state.kind = .text
+                let buttons = kinds.map { kind in
+                    ActionSheetButtonItem(title: miraFakeMessageKindTitle(kind), color: .accent, action: { [weak sheet] in
+                        arguments.state.kind = kind
+                        arguments.updated()
+                        sheet?.dismissAnimated()
+                    })
                 }
-                arguments.updated()
+                sheet.setItemGroups([
+                    ActionSheetItemGroup(items: buttons),
+                    ActionSheetItemGroup(items: [ActionSheetButtonItem(title: presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak sheet] in
+                        sheet?.dismissAnimated()
+                    })])
+                ])
+                arguments.present(sheet)
             })
         case let .mediaResource(value):
             return ItemListSingleLineInputItem(presentationData: presentationData, title: NSAttributedString(), text: value, placeholder: "File path or resource label", type: .regular(capitalization: false, autocorrection: false), sectionId: self.section, textUpdated: { value in
@@ -313,15 +327,25 @@ private func miraClampedMessageTimestamp(_ value: Int64) -> Int32 {
     return Int32(max(Int64(Int32.min), min(Int64(Int32.max), value)))
 }
 
-public func miraFakeMessageController(context: AccountContext, peerId: PeerId, editing record: FakeMessageRecord? = nil) -> ViewController {
+public func miraFakeMessageController(context: AccountContext, peerId: PeerId, editing record: FakeMessageRecord? = nil, onSaved: (() -> Void)? = nil) -> ViewController {
     let state = MiraFakeMessageState(editing: record)
     let versionPromise = ValuePromise<Int>(0, ignoreRepeated: true)
     var dismissImpl: (() -> Void)?
 
-    let arguments = MiraFakeMessageControllerArguments(state: state, updated: {
+    var presentControllerImpl: ((ViewController) -> Void)?
+    let arguments = MiraFakeMessageControllerArguments(context: context, state: state, updated: {
         state.version += 1
         versionPromise.set(state.version)
+    }, present: { controller in
+        presentControllerImpl?(controller)
     })
+    let finishSave: () -> Void = {
+        if let onSaved {
+            onSaved()
+        } else {
+            dismissImpl?()
+        }
+    }
 
     let resolveSenderAndAdd: () -> Void = {
         guard !state.isSubmitting else {
@@ -386,7 +410,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                 state.isSubmitting = false
                 arguments.updated()
                 if success {
-                    dismissImpl?()
+                    finishSave()
                 }
             })
             return
@@ -411,7 +435,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                     guard index < scriptedMessages.count else {
                         state.isSubmitting = false
                         arguments.updated()
-                        dismissImpl?()
+                        finishSave()
                         return
                     }
                     let entry = scriptedMessages[index]
@@ -457,7 +481,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                     } else {
                         state.isSubmitting = false
                         arguments.updated()
-                        dismissImpl?()
+                        finishSave()
                     }
                 }
                 if state.kind == .text {
@@ -548,6 +572,9 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
     }
 
     let controller = ItemListController(context: context, state: signal)
+    presentControllerImpl = { [weak controller] alertController in
+        controller?.present(alertController, in: .window(.root))
+    }
     dismissImpl = { [weak controller] in
         guard let controller else {
             return
@@ -572,8 +599,175 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
     return controller
 }
 
+private final class MiraFakeConversationPickerState {
+    var text = ""
+    var version = 0
+}
+
+private enum MiraFakeConversationPickerEntry: ItemListNodeEntry {
+    case input(String)
+    case hint(String)
+
+    var section: ItemListSectionId {
+        switch self {
+        case .input:
+            return 0
+        case .hint:
+            return 1
+        }
+    }
+
+    var stableId: Int {
+        switch self {
+        case .input:
+            return 0
+        case .hint:
+            return 1
+        }
+    }
+
+    static func <(lhs: MiraFakeConversationPickerEntry, rhs: MiraFakeConversationPickerEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        let arguments = arguments as! MiraFakeConversationPickerArguments
+        switch self {
+        case let .input(value):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListSingleLineInputItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: NSAttributedString(string: isRussian ? "Имя пользователя или ID" : "Username or ID"),
+                text: value,
+                placeholder: isRussian ? "@username или 123456789" : "@username or 123456789",
+                type: .regular(capitalization: false, autocorrection: false),
+                sectionId: self.section,
+                textUpdated: { value in
+                    arguments.state.text = value
+                    arguments.updated()
+                },
+                action: {}
+            )
+        case let .hint(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        }
+    }
+}
+
+private final class MiraFakeConversationPickerArguments {
+    let state: MiraFakeConversationPickerState
+    let updated: () -> Void
+
+    init(state: MiraFakeConversationPickerState, updated: @escaping () -> Void) {
+        self.state = state
+        self.updated = updated
+    }
+}
+
+private func miraNormalizedConversationPeerName(_ value: String) -> String {
+    var name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if name.hasPrefix("@") {
+        name = String(name.dropFirst())
+    }
+    if let range = name.range(of: "t.me/", options: .caseInsensitive) {
+        name = String(name[range.upperBound...])
+    }
+    if let queryIndex = name.firstIndex(of: "?") {
+        name = String(name[..<queryIndex])
+    }
+    return name.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+}
+
+private func miraFakeConversationPickerController(context: AccountContext, push: @escaping (ViewController) -> Void) -> ViewController {
+    let state = MiraFakeConversationPickerState()
+    let versionPromise = ValuePromise<Int>(0, ignoreRepeated: true)
+    let disposable = MetaDisposable()
+    var currentPresentationData = context.sharedContext.currentPresentationData.with { $0 }
+
+    let open = {
+        let value = state.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            return
+        }
+        let openPeer: (PeerId) -> Void = { peerId in
+            guard peerId != context.account.peerId else {
+                return
+            }
+            let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+            |> deliverOnMainQueue).start(next: { peer in
+                guard let peer, case .user = peer else {
+                    let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                    let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Укажите пользователя Telegram, чтобы открыть личную переписку." : "Choose a Telegram user to open a personal conversation.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
+                    context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+                    return
+                }
+                push(context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil))
+                push(miraFakeMessageController(context: context, peerId: peerId))
+            })
+        }
+        if let idValue = Int64(value) {
+            let peerId = PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(idValue))
+            disposable.set((context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+            |> deliverOnMainQueue).start(next: { peer in
+                guard let peer, case .user = peer else {
+                    let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                    let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Введите username или ID пользователя, уже известного этому аккаунту." : "Enter a Telegram username or an ID already known by this account.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
+                    context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+                    return
+                }
+                openPeer(peer.id)
+            }))
+            return
+        }
+        let name = miraNormalizedConversationPeerName(value)
+        guard !name.isEmpty else {
+            return
+        }
+        disposable.set((context.engine.peers.resolvePeerByName(name: name, referrer: nil)
+        |> deliverOnMainQueue).start(next: { result in
+            if case let .result(peer) = result, let peer, case .user = peer {
+                openPeer(peer.id)
+            } else if case .result = result {
+                let isRussian = currentPresentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                let alert = textAlertController(context: context, title: isRussian ? "Пользователь не найден" : "User not found", text: isRussian ? "Проверьте username и попробуйте ещё раз." : "Check the username and try again.", actions: [TextAlertAction(type: .defaultAction, title: currentPresentationData.strings.Common_OK, action: {})])
+                context.sharedContext.mainWindow?.present(alert, in: .window(.root))
+            }
+        }))
+    }
+
+    let signal = combineLatest(context.sharedContext.presentationData, versionPromise.get())
+    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, MiraFakeConversationPickerArguments)) in
+        currentPresentationData = presentationData
+        let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let controllerState = ItemListControllerState(
+            presentationData: ItemListPresentationData(presentationData),
+            title: .text(isRussian ? "Новая переписка" : "Open conversation"),
+            leftNavigationButton: nil,
+            rightNavigationButton: ItemListNavigationButton(content: .text(isRussian ? "Продолжить" : "Open"), style: .bold, enabled: !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: open),
+            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back),
+            animateChanges: true
+        )
+        let entries: [MiraFakeConversationPickerEntry] = [
+            .input(state.text),
+            .hint(isRussian
+                ? "Введите username или известный аккаунту Telegram ID. Существующая история останется на месте, новые сообщения появятся в этой переписке с выбранным временем."
+                : "Use a username or a Telegram ID already known by this account. Existing history stays in place; added messages appear in the same chat at their selected times.")
+        ]
+        let arguments = MiraFakeConversationPickerArguments(state: state, updated: {
+            state.version += 1
+            versionPromise.set(state.version)
+        })
+        return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), arguments))
+    }
+    let controller = ItemListController(context: context, state: signal)
+    controller.navigationPresentation = .modal
+    return controller
+}
+
 private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
     case add(String)
+    case choose(String)
     case count(String)
     case message(Int, FakeMessageRecord, String, String)
     case removeAll(String)
@@ -581,7 +775,7 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .add, .count:
+        case .add, .choose, .count:
             return 0
         case .message, .removeAll, .empty:
             return 1
@@ -619,10 +813,12 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
         switch self {
         case .add:
             return 0
-        case .count:
+        case .choose:
             return 1
+        case .count:
+            return 2
         case let .message(index, _, _, _):
-            return 2 + index
+            return 3 + index
         case .removeAll:
             return Int.max - 1
         case .empty:
@@ -638,6 +834,10 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
         case let .add(title):
             return ItemListDisclosureItem(presentationData: presentationData, title: title, label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.add()
+            })
+        case let .choose(title):
+            return ItemListDisclosureItem(presentationData: presentationData, title: title, label: "Username or ID", sectionId: self.section, style: .blocks, action: {
+                arguments.choose()
             })
         case let .count(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
@@ -657,12 +857,14 @@ private enum MiraFakeMessagesListEntry: ItemListNodeEntry {
 
 private final class MiraFakeMessagesListArguments {
     let add: () -> Void
+    let choose: () -> Void
     let showActions: (FakeMessageRecord) -> Void
     let confirmRemoveAll: () -> Void
     let confirmRemove: (FakeMessageRecord) -> Void
 
-    init(add: @escaping () -> Void, showActions: @escaping (FakeMessageRecord) -> Void, confirmRemoveAll: @escaping () -> Void, confirmRemove: @escaping (FakeMessageRecord) -> Void) {
+    init(add: @escaping () -> Void, choose: @escaping () -> Void, showActions: @escaping (FakeMessageRecord) -> Void, confirmRemoveAll: @escaping () -> Void, confirmRemove: @escaping (FakeMessageRecord) -> Void) {
         self.add = add
+        self.choose = choose
         self.showActions = showActions
         self.confirmRemoveAll = confirmRemoveAll
         self.confirmRemove = confirmRemove
@@ -681,6 +883,10 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
     var presentControllerImpl: ((ViewController) -> Void)?
     let arguments = MiraFakeMessagesListArguments(add: {
         pushControllerImpl?(miraFakeMessageController(context: context, peerId: peerId))
+    }, choose: {
+        pushControllerImpl?(miraFakeConversationPickerController(context: context, push: { controller in
+            pushControllerImpl?(controller)
+        }))
     }, showActions: { record in
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let actionSheet = ActionSheetController(presentationData: presentationData)
@@ -743,6 +949,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         }
         var entries: [MiraFakeMessagesListEntry] = []
         entries.append(.add("Add Message"))
+        entries.append(.choose("Choose Telegram user"))
         entries.append(.count(peerRecords.isEmpty ? "No messages" : "\(peerRecords.count) message\(peerRecords.count == 1 ? "" : "s")"))
         if peerRecords.isEmpty {
             entries.append(.empty("No messages yet."))

@@ -949,7 +949,7 @@ public class VideoMessageCameraScreen: ViewController {
             self.previewContainerContentView.clipsToBounds = true
             self.previewContainerView.addSubview(self.previewContainerContentView)
                         
-            let isDualCameraEnabled = Camera.isDualCameraSupported(forRoundVideo: true)
+            let isDualCameraEnabled = !controller.recordAt60Fps && Camera.isDualCameraSupported(forRoundVideo: true)
             let isFrontPosition = controller.initialCameraPosition == .front
             
             self.mainPreviewView = CameraSimplePreviewView(frame: .zero, main: true, roundVideo: true)
@@ -1077,7 +1077,8 @@ public class VideoMessageCameraScreen: ViewController {
                     audio: true,
                     photo: false,
                     metadata: false,
-                    isRoundVideo: true
+                    isRoundVideo: true,
+                    preferredFrameRate: self.controller?.recordAt60Fps == true ? 60.0 : nil
                 ),
                 previewView: self.mainPreviewView,
                 secondaryPreviewView: self.additionalPreviewView
@@ -1641,6 +1642,7 @@ public class VideoMessageCameraScreen: ViewController {
     private let context: AccountContext
     private let updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?
     private let initialCameraPosition: Camera.Position
+    fileprivate let recordAt60Fps: Bool
     private let inputPanelFrame: (CGRect, Bool)
     fileprivate var allowLiveUpload: Bool
     fileprivate var viewOnceAvailable: Bool
@@ -1797,6 +1799,7 @@ public class VideoMessageCameraScreen: ViewController {
         allowLiveUpload: Bool,
         viewOnceAvailable: Bool,
         initialCameraPosition: Camera.Position = .front,
+        recordAt60Fps: Bool = false,
         inputPanelFrame: (CGRect, Bool),
         chatNode: ASDisplayNode?,
         completion: @escaping (EnqueueMessage?, Bool?, Int32?, Int32?) -> Void
@@ -1806,6 +1809,7 @@ public class VideoMessageCameraScreen: ViewController {
         self.allowLiveUpload = allowLiveUpload
         self.viewOnceAvailable = viewOnceAvailable
         self.initialCameraPosition = initialCameraPosition
+        self.recordAt60Fps = recordAt60Fps
         self.inputPanelFrame = inputPanelFrame
         self.chatNode = chatNode
         self.completion = completion

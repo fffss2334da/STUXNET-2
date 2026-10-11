@@ -58,6 +58,12 @@ extension StarGiftCollection {
     }
 }
 
+private func miraLocalStarGiftCollection(_ collection: MiraFakeGiftCollection) -> StarGiftCollection {
+    let count = Int32(clamping: collection.gifts.count)
+    let hash = (Int64(collection.id) << 32) ^ Int64(count)
+    return StarGiftCollection(id: collection.id, title: collection.title, icon: nil, count: count, hash: hash)
+}
+
 private final class CachedProfileGiftsCollections: Codable {
     enum CodingKeys: String, CodingKey {
         case collections
@@ -198,6 +204,7 @@ private func _internal_reorderStarGiftCollections(account: Account, peerId: Engi
 }
 
 private func _internal_updateStarGiftCollection(account: Account, peerId: EnginePeer.Id, collectionId: Int32, giftsContext: ProfileGiftsContext?, allGiftsContext: ProfileGiftsContext?, actions: [ProfileGiftsCollectionsContext.UpdateAction]) -> Signal<StarGiftCollection?, NoError> {
+    var remoteActions: [ProfileGiftsCollectionsContext.UpdateAction] = []
     for action in actions {
         switch action {
         case let .addGifts(gifts):
@@ -207,13 +214,60 @@ private func _internal_updateStarGiftCollection(account: Account, peerId: Engine
                 return gift.withCollectionIds(collectionIds)
             }
             giftsContext?.insertStarGifts(gifts: gifts)
+            let localGifts = gifts.filter { gift in
+                guard let reference = gift.reference else {
+                    return false
+                }
+                return account.miraFakeGiftsStore.isLocalReference(reference, accountPeerId: account.peerId)
+            }
+            if !localGifts.isEmpty {
+                _ = account.miraFakeGiftsStore.updateFakeGiftCollectionMembership(
+                    ownerPeerId: peerId,
+                    collectionId: collectionId,
+                    references: localGifts.compactMap { $0.reference },
+                    added: true
+                )
+            }
+            let remoteGifts = gifts.filter { gift in
+                guard let reference = gift.reference else {
+                    return false
+                }
+                return !account.miraFakeGiftsStore.isLocalReference(reference, accountPeerId: account.peerId)
+            }
+            if !remoteGifts.isEmpty {
+                remoteActions.append(.addGifts(remoteGifts))
+            }
         case let .removeGifts(gifts):
             giftsContext?.removeStarGifts(references: gifts)
+            let localReferences = gifts.filter { account.miraFakeGiftsStore.isLocalReference($0, accountPeerId: account.peerId) }
+            if !localReferences.isEmpty {
+                _ = account.miraFakeGiftsStore.updateFakeGiftCollectionMembership(
+                    ownerPeerId: peerId,
+                    collectionId: collectionId,
+                    references: localReferences,
+                    added: false
+                )
+            }
+            let remoteReferences = gifts.filter { !account.miraFakeGiftsStore.isLocalReference($0, accountPeerId: account.peerId) }
+            if !remoteReferences.isEmpty {
+                remoteActions.append(.removeGifts(remoteReferences))
+            }
         case let .reorderGifts(gifts):
             giftsContext?.reorderStarGifts(references: gifts)
+            let remoteReferences = gifts.filter { !account.miraFakeGiftsStore.isLocalReference($0, accountPeerId: account.peerId) }
+            if !remoteReferences.isEmpty {
+                remoteActions.append(.reorderGifts(remoteReferences))
+            }
         default:
-            break
+            remoteActions.append(action)
         }
+    }
+
+    if collectionId < 0 {
+        return .single(nil)
+    }
+    guard !remoteActions.isEmpty else {
+        return .single(nil)
     }
     
     return account.postbox.transaction { transaction -> (Api.InputPeer, (FunctionDescription, Buffer, DeserializeFunctionResponse<Api.StarGiftCollection>))? in
@@ -227,7 +281,7 @@ private func _internal_updateStarGiftCollection(account: Account, peerId: Engine
         var addStarGift: [Api.InputSavedStarGift] = []
         var order: [Api.InputSavedStarGift] = []
         
-        for action in actions {
+        for action in remoteActions {
             switch action {
             case let .updateTitle(newTitle):
                 flags |= (1 << 0)
@@ -347,12 +401,17 @@ public final class ProfileGiftsCollectionsContext {
         self.isLoading = true
         self.pushState()
         
-        self.disposable.set((_internal_getStarGiftCollections(postbox: self.account.postbox, network: self.account.network, peerId: self.peerId)
-        |> deliverOn(self.queue)).start(next: { [weak self] collections in
+        self.disposable.set((combineLatest(
+            _internal_getStarGiftCollections(postbox: self.account.postbox, network: self.account.network, peerId: self.peerId),
+            self.account.miraFakeGiftsStore.collectionsChanges
+        )
+        |> deliverOn(self.queue)).start(next: { [weak self] serverCollections, localCollections in
             guard let self else {
                 return
             }
-            self.collections = collections ?? []
+            let fakeGiftsEnabled = MiraCoreGate.shared.snapshot(forAccountPeerId: self.account.peerId).fakeGiftsEnabled
+            let local = fakeGiftsEnabled ? localCollections.filter { $0.ownerPeerId == self.peerId.toInt64() }.map(miraLocalStarGiftCollection) : []
+            self.collections = (serverCollections ?? []).map { self.collectionWithFakeGiftCount($0) } + local
             self.isLoading = false
             self.pushState()
             self.updateCache()
@@ -360,7 +419,14 @@ public final class ProfileGiftsCollectionsContext {
     }
     
     public func createCollection(title: String, starGifts: [ProfileGiftsContext.State.StarGift]) -> Signal<StarGiftCollection?, NoError> {
-        return _internal_createStarGiftCollection(account: self.account, peerId: self.peerId, title: title, starGifts: starGifts)
+        let signal: Signal<StarGiftCollection?, NoError>
+        if MiraCoreGate.shared.snapshot(forAccountPeerId: self.account.peerId).fakeGiftsEnabled {
+            let collection = self.account.miraFakeGiftsStore.createLocalCollection(ownerPeerId: self.peerId, title: title, gifts: starGifts)
+            signal = .single(collection.map(miraLocalStarGiftCollection))
+        } else {
+            signal = _internal_createStarGiftCollection(account: self.account, peerId: self.peerId, title: title, starGifts: starGifts)
+        }
+        return signal
         |> deliverOn(self.queue)
         |> beforeNext { [weak self] collection in
             guard let self else {
@@ -375,20 +441,66 @@ public final class ProfileGiftsCollectionsContext {
     }
     
     public func updateCollection(id: Int32, actions: [UpdateAction]) -> Signal<StarGiftCollection?, NoError> {
+        if id < 0 {
+            guard var collection = self.account.miraFakeGiftsStore.localCollection(id: id, ownerPeerId: self.peerId) else {
+                return .single(nil)
+            }
+            for action in actions {
+                switch action {
+                case let .updateTitle(title):
+                    collection.title = title
+                case let .addGifts(gifts):
+                    var references = Set(collection.gifts.compactMap { $0.reference })
+                    collection.gifts.append(contentsOf: gifts.filter { gift in
+                        guard let reference = gift.reference else { return false }
+                        return references.insert(reference).inserted
+                    })
+                case let .removeGifts(references):
+                    let removed = Set(references)
+                    collection.gifts.removeAll(where: { $0.reference.map(removed.contains) ?? false })
+                case let .reorderGifts(references):
+                    let giftsByReference = Dictionary(uniqueKeysWithValues: collection.gifts.compactMap { gift in
+                        gift.reference.map { ($0, gift) }
+                    })
+                    var reordered = references.compactMap { giftsByReference[$0] }
+                    let included = Set(reordered.compactMap { $0.reference })
+                    reordered.append(contentsOf: collection.gifts.filter { gift in
+                        guard let reference = gift.reference else { return false }
+                        return !included.contains(reference)
+                    })
+                    collection.gifts = reordered
+                }
+            }
+            guard let updated = self.account.miraFakeGiftsStore.updateLocalCollection(ownerPeerId: self.peerId, collectionId: id, title: collection.title, gifts: collection.gifts) else {
+                return .single(nil)
+            }
+            let result = miraLocalStarGiftCollection(updated)
+            if let index = self.collections.firstIndex(where: { $0.id == id }) {
+                self.collections[index] = result
+                self.pushState()
+                self.updateCache()
+            }
+            return .single(result)
+        }
+        let previousFakeCount = self.localFakeGiftCount(collectionId: id)
         let giftsContext = self.giftsContextForCollection(id: id)
         return _internal_updateStarGiftCollection(account: self.account, peerId: self.peerId, collectionId: id, giftsContext: giftsContext, allGiftsContext: self.allGiftsContext, actions: actions)
         |> deliverOn(self.queue)
-        |> afterNext { [weak self] collection in
+        |> map { [weak self] serverCollection -> StarGiftCollection? in
             guard let self else {
-                return
+                return serverCollection
             }
-            if let collection {
-                if let index = self.collections.firstIndex(where: { $0.id == id }) {
-                    self.collections[index] = collection
-                    self.pushState()
-                    self.updateCache()
-                }
+            let base = serverCollection ?? self.collections.first(where: { $0.id == id })
+            guard let base else {
+                return nil
             }
+            let updated = self.collectionWithFakeGiftCount(base, removingPreviouslyProjectedCount: serverCollection == nil ? previousFakeCount : 0)
+            if let index = self.collections.firstIndex(where: { $0.id == id }) {
+                self.collections[index] = updated
+                self.pushState()
+                self.updateCache()
+            }
+            return updated
         }
     }
     
@@ -410,9 +522,15 @@ public final class ProfileGiftsCollectionsContext {
     
     public func reorderCollections(order: [Int32]) -> Signal<Bool, NoError> {
         let peerId = self.peerId
-        return _internal_reorderStarGiftCollections(account: self.account, peerId: peerId, order: order)
+        let localIds = order.filter { $0 < 0 }
+        if !localIds.isEmpty {
+            self.account.miraFakeGiftsStore.reorderLocalCollections(ownerPeerId: self.peerId, ids: localIds)
+        }
+        let remoteIds = order.filter { $0 >= 0 }
+        let signal: Signal<Bool, NoError> = remoteIds.isEmpty ? .single(true) : _internal_reorderStarGiftCollections(account: self.account, peerId: peerId, order: remoteIds)
+        return signal
         |> deliverOn(self.queue)
-        |> afterNext { [weak self] collection in
+        |> afterNext { [weak self] _ in
             guard let self else {
                 return
             }
@@ -433,12 +551,29 @@ public final class ProfileGiftsCollectionsContext {
     }
     
     public func deleteCollection(id: Int32) -> Signal<Bool, NoError> {
+        if id < 0 {
+            let deleted = self.account.miraFakeGiftsStore.deleteLocalCollection(ownerPeerId: self.peerId, collectionId: id)
+            if deleted {
+                self.giftsContexts.removeValue(forKey: id)
+                self.collections.removeAll(where: { $0.id == id })
+                self.pushState()
+                self.updateCache()
+            }
+            return .single(deleted)
+        }
         return _internal_deleteStarGiftCollection(account: self.account, peerId: self.peerId, collectionId: id)
         |> deliverOn(self.queue)
-        |> afterNext { [weak self] _ in
+        |> afterNext { [weak self] success in
             guard let self else {
                 return
             }
+            guard success else {
+                return
+            }
+            let localReferences = self.account.miraFakeGiftsStore.list().filter { $0.collectionIds.contains(id) }.map { entry in
+                StarGiftReference.peer(peerId: self.account.peerId, id: entry.stableSavedId)
+            }
+            _ = self.account.miraFakeGiftsStore.updateFakeGiftCollectionMembership(ownerPeerId: self.peerId, collectionId: id, references: localReferences, added: false)
             self.giftsContexts.removeValue(forKey: id)
             self.collections.removeAll(where: { $0.id == id })
             self.pushState()
@@ -454,6 +589,27 @@ public final class ProfileGiftsCollectionsContext {
                 transaction.putItemCacheEntry(id: entryId(peerId: peerId), entry: entry)
             }
         }).start()
+    }
+
+    private func localFakeGiftCount(collectionId: Int32) -> Int32 {
+        return Int32(clamping: self.account.miraFakeGiftsStore.list().filter { entry in
+            guard let owner = entry.ownerPeerId else {
+                return self.peerId == self.account.peerId && entry.collectionIds.contains(collectionId)
+            }
+            return owner == self.peerId.toInt64() && entry.collectionIds.contains(collectionId)
+        }.count)
+    }
+
+    private func collectionWithFakeGiftCount(_ collection: StarGiftCollection, removingPreviouslyProjectedCount: Int32 = 0) -> StarGiftCollection {
+        let localCount = self.localFakeGiftCount(collectionId: collection.id)
+        let baseCount = max(0, collection.count - max(0, removingPreviouslyProjectedCount))
+        return StarGiftCollection(
+            id: collection.id,
+            title: collection.title,
+            icon: collection.icon,
+            count: baseCount + localCount,
+            hash: collection.hash ^ Int64(localCount)
+        )
     }
     
     private func pushState() {

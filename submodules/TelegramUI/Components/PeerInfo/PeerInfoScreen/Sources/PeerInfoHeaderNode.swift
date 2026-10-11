@@ -2039,10 +2039,9 @@ final class PeerInfoHeaderNode: ASDisplayNode {
         var subtitleRatingSize: CGSize?
         
         let miraSettings = self.context.sharedContext.immediateMiraSettings
-        if peer?.id == self.context.account.peerId, miraSettings.fakeRatingEnabled {
+        if peer?.id == self.context.account.peerId, miraSettings.fakeRatingEnabled, let cachedData = cachedData as? CachedUserData, let serverRating = cachedData.starRating {
             let ratingValue = max(0, miraSettings.fakeRatingValue)
-            let level = miraSettings.effectiveFakeRatingLevel
-            self.currentStarRating = TelegramStarRating(level: level, currentLevelStars: 0, stars: ratingValue, nextLevelStars: nil)
+            self.currentStarRating = TelegramStarRating(level: serverRating.level, currentLevelStars: serverRating.currentLevelStars, stars: ratingValue, nextLevelStars: serverRating.nextLevelStars)
             self.currentPendingStarRating = nil
         } else if let cachedData = cachedData as? CachedUserData, let starRating = cachedData.starRating {
             self.currentStarRating = starRating

@@ -434,8 +434,27 @@ final class StarsTransactionsListPanelComponent: Component {
                             itemSubtitle = nil
                         }
                     case .unsupported:
-                        itemTitle = item.title ?? environment.strings.Stars_Intro_Transaction_Unsupported_Title
-                        itemSubtitle = item.description ?? (item.flags.contains(.isLocal) ? "Local transaction" : nil)
+                        if item.flags.contains(.isLocal) {
+                            // Local projections use the same copy as the
+                            // corresponding Telegram transaction type. Do
+                            // not leak ledger/debug notes into the native UI.
+                            if item.flags.contains(.isPaidMessage) {
+                                itemTitle = environment.strings.Stars_Intro_Transaction_Unsupported_Title
+                                itemSubtitle = environment.strings.Stars_Intro_Transaction_PaidMessage(item.paidMessageCount ?? 1)
+                            } else if item.flags.contains(.isReaction) {
+                                itemTitle = environment.strings.Stars_Intro_Transaction_Unsupported_Title
+                                itemSubtitle = environment.strings.Stars_Intro_Transaction_Reaction_Title
+                            } else if item.flags.contains(.isGift) {
+                                itemTitle = environment.strings.Stars_Intro_Transaction_Gift_UnknownUser
+                                itemSubtitle = environment.strings.Stars_Intro_Transaction_Gift_Title
+                            } else {
+                                itemTitle = environment.strings.Stars_Intro_Transaction_Unsupported_Title
+                                itemSubtitle = nil
+                            }
+                        } else {
+                            itemTitle = item.title ?? environment.strings.Stars_Intro_Transaction_Unsupported_Title
+                            itemSubtitle = item.description
+                        }
                     }
                     
                     let itemLabel: NSAttributedString

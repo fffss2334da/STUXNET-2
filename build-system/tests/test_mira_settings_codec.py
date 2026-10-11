@@ -81,6 +81,9 @@ roundTrip(configured)
 struct OldSettings: Encodable { let localPremium: Bool; let ghost: [String: MiraGhostSettings] }
 let migrated = PreferencesEntry(OldSettings(localPremium: true, ghost: ["0": ghost]))!.get(MiraSettings.self)!
 check(migrated.localPremium && migrated.ghost["0"] == ghost && migrated.ghostByAccount.isEmpty, "legacy settings migrate")
+struct OldVoiceSettings: Encodable { let voiceChangerEnabled: Bool }
+let migratedVoice = PreferencesEntry(OldVoiceSettings(voiceChangerEnabled: true))!.get(MiraSettings.self)!
+check(migratedVoice.voiceChangerEnabled && migratedVoice.voiceChangerPreset == MiraSettings.defaultVoiceChangerPreset, "enabled legacy voice changer gets a usable preset")
 '''
     # Toggle every persisted boolean independently with both empty and populated
     # dictionaries, exactly like each settings action followed by sharedData.

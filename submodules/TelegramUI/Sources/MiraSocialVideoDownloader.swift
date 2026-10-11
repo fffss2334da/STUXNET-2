@@ -3,9 +3,7 @@ import Network
 import Photos
 import TelegramUIPreferences
 
-/// Handles opt-in social-video downloads for links typed into a chat. The
-/// resolver downloads to a temporary local file and hands it to the current
-/// chat for upload.
+/// Handles opt-in social-video downloads for links typed into a chat.
 public final class MiraSocialVideoDownloadHandle {
     private let lock = NSLock()
     private var task: URLSessionDownloadTask?
@@ -143,7 +141,7 @@ public final class MiraSocialVideoDownloader {
             return nil
         }
         let handle = MiraSocialVideoDownloadHandle()
-        Self.resolveAndDownload(link: link, destination: .chat, quality: settings.quality, handle: handle, progress: progress, completion: completion)
+        Self.resolveAndDownload(link: link, destination: settings.destination, quality: settings.quality, handle: handle, progress: progress, completion: completion)
         return handle
     }
 
@@ -160,9 +158,12 @@ public final class MiraSocialVideoDownloader {
         guard !settings.wifiOnly || (Self.pathMonitor.currentPath.status == .satisfied && Self.pathMonitor.currentPath.usesInterfaceType(.wifi)) else {
             return
         }
+        guard settings.destination == .chat else {
+            return
+        }
         for link in enabledLinks {
             queue.async {
-                Self.resolveAndDownload(link: link, destination: .chat, quality: settings.quality, handle: MiraSocialVideoDownloadHandle(), progress: nil, completion: nil)
+                Self.resolveAndDownload(link: link, destination: settings.destination, quality: settings.quality, handle: MiraSocialVideoDownloadHandle(), progress: nil, completion: nil)
             }
         }
     }
@@ -246,41 +247,19 @@ public final class MiraSocialVideoDownloader {
             return
         }
         let fileName = "stuxnet-\(UUID().uuidString).mp4"
-        if saveDestination == .chat {
-            let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Stuxnet Social Videos", isDirectory: true)
-            do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                let destinationURL = directory.appendingPathComponent(fileName)
-                try FileManager.default.moveItem(at: location, to: destinationURL)
-                Self.finish(completion, value: destinationURL, handle: handle)
-            } catch {
-                try? FileManager.default.removeItem(at: location)
-                Self.finish(completion, value: nil, handle: handle)
-            }
-            return
-        }
-        let directory: URL
-        switch saveDestination {
-        case .chat:
-            // Handled above; this branch keeps the enum switch exhaustive if
-            // the destination is extended by a caller in the future.
-            directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        case .files:
-            directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Social Videos", isDirectory: true)
-        case .photos:
-            directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        }
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Stuxnet Social Videos", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let destinationURL = directory.appendingPathComponent(fileName)
             try FileManager.default.moveItem(at: location, to: destinationURL)
-            Self.finish(completion, value: nil, handle: handle)
             guard saveDestination == .photos else {
+                // Chat uploads and Files exports both consume this temporary
+                // URL in ChatController; Files uses the system export picker.
+                Self.finish(completion, value: destinationURL, handle: handle)
                 return
             }
-            PHPhotoLibrary.requestAuthorization { status in
+            let saveToPhotos: (PHAuthorizationStatus) -> Void = { status in
                 let canSaveToPhotos: Bool
                 if #available(iOS 14.0, *) {
                     canSaveToPhotos = status == .authorized || status == .limited
@@ -288,11 +267,23 @@ public final class MiraSocialVideoDownloader {
                     canSaveToPhotos = status == .authorized
                 }
                 guard canSaveToPhotos else {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    Self.finish(completion, value: nil, handle: handle)
                     return
                 }
                 PHPhotoLibrary.shared().performChanges {
                     PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destinationURL)
+                } completionHandler: { success, _ in
+                    if !success {
+                        try? FileManager.default.removeItem(at: destinationURL)
+                    }
+                    Self.finish(completion, value: success ? destinationURL : nil, handle: handle)
                 }
+            }
+            if #available(iOS 14.0, *) {
+                PHPhotoLibrary.requestAuthorization(for: .addOnly, handler: saveToPhotos)
+            } else {
+                PHPhotoLibrary.requestAuthorization(saveToPhotos)
             }
         } catch {
             try? FileManager.default.removeItem(at: location)

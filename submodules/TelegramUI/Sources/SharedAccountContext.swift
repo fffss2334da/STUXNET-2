@@ -256,6 +256,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
         snapshot.localMessageEditEnabled = settings.localMessageEditEnabled
         snapshot.isGhostActive = ghostSettings.isGhostActive
         snapshot.fakeGiftsEnabled = settings.fakeGiftsEnabled
+        snapshot.fakeStarsEnabled = settings.fakeStarsEnabled
         snapshot.voiceChangerEnabled = settings.voiceChangerEnabled
         snapshot.voiceChangerPreset = settings.voiceChangerPreset
         return snapshot

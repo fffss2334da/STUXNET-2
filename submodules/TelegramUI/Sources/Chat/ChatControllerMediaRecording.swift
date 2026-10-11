@@ -180,6 +180,7 @@ extension ChatControllerImpl {
                     allowLiveUpload: allowLiveUpload,
                     viewOnceAvailable: viewOnceAvailable,
                     initialCameraPosition: self.context.sharedContext.immediateMiraSettings.videoMessagesUseBackCamera ? .back : .front,
+                    recordAt60Fps: self.context.sharedContext.immediateMiraSettings.videoMessagesUse60Fps,
                     inputPanelFrame: (currentInputPanelFrame, self.chatDisplayNode.inputNode != nil),
                     chatNode: self.chatDisplayNode.historyNode,
                     completion: { [weak self] message, silentPosting, scheduleTime, repeatPeriod in

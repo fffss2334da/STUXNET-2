@@ -9128,7 +9128,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     private func enqueueSocialVideoLink(_ link: MiraSocialVideoLink, settings: MiraSocialVideoSettings, completion: @escaping (Bool) -> Void = { _ in }) {
         var downloadHandle: MiraSocialVideoDownloadHandle?
         var wasCancelled = false
-        let alert = UIAlertController(title: "Sending video", message: "Preparing video...", preferredStyle: .alert)
+        let isRussian = self.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        let isChatDestination = settings.destination == .chat
+        let alert = UIAlertController(
+            title: isChatDestination ? (isRussian ? "Отправка видео" : "Sending video") : (isRussian ? "Сохранение видео" : "Saving video"),
+            message: isRussian ? "Подготовка видео..." : "Preparing video...",
+            preferredStyle: .alert
+        )
         alert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Cancel, style: .cancel, handler: { _ in
             wasCancelled = true
             downloadHandle?.cancel()
@@ -9143,23 +9149,47 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             // UIAlertController exposes its message as read-only in UIKit;
             // KVC updates the already-presented alert without replacing it,
             // keeping the cancel action and download handle intact.
-            alert.setValue("Downloading video... \(percent)%", forKey: "message")
+            alert.message = isRussian ? "Загрузка видео... \(percent)%" : "Downloading video... \(percent)%"
         }) { [weak self, weak alert] url in
             alert?.dismiss(animated: true, completion: nil)
             guard let self, let url else {
                 guard !wasCancelled, let self else {
                     return
                 }
-                let errorAlert = UIAlertController(title: "Video download failed", message: "Check the connection and try again.", preferredStyle: .alert)
-                errorAlert.addAction(UIAlertAction(title: self.presentationData.strings.Common_Cancel, style: .cancel, handler: nil))
-                errorAlert.addAction(UIAlertAction(title: "Retry", style: .default, handler: { [weak self] _ in
+                let errorAlert = UIAlertController(
+                    title: isRussian ? "Не удалось загрузить видео" : "Video download failed",
+                    message: settings.destination == .photos
+                        ? (isRussian ? "Проверьте подключение и разрешение на добавление в Фото." : "Check the connection and Photos access.")
+                        : (isRussian ? "Проверьте подключение и попробуйте ещё раз." : "Check the connection and try again."),
+                    preferredStyle: .alert
+                )
+                errorAlert.addAction(UIAlertAction(title: isRussian ? "Отмена" : self.presentationData.strings.Common_Cancel, style: .cancel, handler: nil))
+                errorAlert.addAction(UIAlertAction(title: isRussian ? "Повторить" : "Retry", style: .default, handler: { [weak self] _ in
                     self?.enqueueSocialVideoLink(link, settings: settings)
                 }))
                 self.present(errorAlert, animated: true, completion: nil)
                 completion(false)
                 return
             }
-            self.enqueueDownloadedSocialVideo(url, sourceURL: link.url)
+            switch settings.destination {
+            case .chat:
+                self.enqueueDownloadedSocialVideo(url, sourceURL: link.url)
+            case .files:
+                let picker = legacyICloudFilePicker(theme: self.presentationData.theme, mode: .export, url: url, documentTypes: [], forceDarkTheme: false, dismissed: {}, completion: { urls in
+                    try? FileManager.default.removeItem(at: url)
+                    completion(!urls.isEmpty)
+                })
+                self.present(picker, in: .window(.root))
+                return
+            case .photos:
+                try? FileManager.default.removeItem(at: url)
+                let successAlert = UIAlertController(title: isRussian ? "Видео сохранено" : "Video saved", message: isRussian ? "Видео добавлено в Фото." : "The video was added to Photos.", preferredStyle: .alert)
+                successAlert.addAction(UIAlertAction(title: isRussian ? "Готово" : self.presentationData.strings.Common_OK, style: .default, handler: { _ in
+                    completion(true)
+                }))
+                self.present(successAlert, animated: true, completion: nil)
+                return
+            }
             // Keep the cache file briefly so Telegram can retry a failed upload.
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60.0 * 60.0) {
                 try? FileManager.default.removeItem(at: url)
@@ -9220,14 +9250,16 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     if !socialVideoLinks.isEmpty {
                         if socialVideoSettings.confirmBeforeDownload {
                             let platformNames = Array(Set(socialVideoLinks.map { $0.platform.title })).sorted().joined(separator: ", ")
+                            let isRussian = self.presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+                            let destinationTitle = socialVideoSettings.destination.title(isRussian: isRussian)
                             let alert = textAlertController(
                                 context: self.context,
                                 updatedPresentationData: self.updatedPresentationData,
-                                title: "Download social video?",
-                                text: "The video from \(platformNames) will be sent to this chat after it loads.",
+                                title: isRussian ? "Загрузить видео?" : "Download social video?",
+                                text: isRussian ? "Видео из \(platformNames) будет сохранено: \(destinationTitle)." : "The video from \(platformNames) will be saved to: \(destinationTitle).",
                                 actions: [
                                     TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}),
-                                    TextAlertAction(type: .defaultAction, title: "Download", action: {
+                                    TextAlertAction(type: .defaultAction, title: isRussian ? "Загрузить" : "Download", action: {
                                         self.enqueueSocialVideoLinks(socialVideoLinks, settings: socialVideoSettings)
                                     })
                                 ]

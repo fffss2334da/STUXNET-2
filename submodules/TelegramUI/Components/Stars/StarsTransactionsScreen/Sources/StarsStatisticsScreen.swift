@@ -165,11 +165,8 @@ final class StarsStatisticsScreenComponent: Component {
         
         private var stateDisposable: Disposable?
         private var starsState: StarsRevenueStats?
-        /// Account-local fake Stars are rendered alongside the server revenue
-        /// state. Keep this separate from `starsState`: the latter contains
-        /// server-only graph and withdrawal metadata that must never be
-        /// fabricated from a local balance.
-        private var fakeStarsBalance: Int64?
+        /// Local projections replace server-only revenue data while enabled.
+        private var fakeStarsLedger: MiraFakeStarsLedgerSnapshot?
         
         private var previousBalance: Int64?
                 
@@ -213,6 +210,52 @@ final class StarsStatisticsScreenComponent: Component {
         
         deinit {
             self.stateDisposable?.dispose()
+        }
+
+        private func localStarsGraph(_ snapshot: MiraFakeStarsLedgerSnapshot, title: String) -> StatsGraph {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            let days = (0 ..< 30).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
+            guard let firstDay = days.first, !days.isEmpty else {
+                return .Empty
+            }
+            var values = Array(repeating: 0.0, count: days.count)
+            for entry in snapshot.entries where entry.kind != .initial && entry.delta > 0 {
+                let entryDay = calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(entry.date)))
+                guard let index = calendar.dateComponents([.day], from: firstDay, to: entryDay).day,
+                      values.indices.contains(index) else {
+                    continue
+                }
+                values[index] += Double(entry.delta)
+            }
+            var xColumn: [Any] = ["x"]
+            xColumn.append(contentsOf: days.map { NSNumber(value: Int64($0.timeIntervalSince1970)) })
+            var yColumn: [Any] = ["y"]
+            yColumn.append(contentsOf: values.map { NSNumber(value: $0) })
+            let graph: [String: Any] = [
+                "columns": [xColumn, yColumn],
+                "types": ["x": "x", "y": "bar"],
+                "names": ["y": title],
+                "colors": ["y": "#F5A623"]
+            ]
+            guard let data = try? JSONSerialization.data(withJSONObject: graph, options: [.sortedKeys]),
+                  let string = String(data: data, encoding: .utf8) else {
+                return .Empty
+            }
+            return .Loaded(token: nil, data: string)
+        }
+
+        private func localStarsTotalRevenue(_ snapshot: MiraFakeStarsLedgerSnapshot) -> Int64 {
+            return snapshot.entries.reduce(Int64(0)) { current, entry in
+                guard entry.kind != .initial, entry.delta > 0 else {
+                    return current
+                }
+                let result = current.addingReportingOverflow(entry.delta)
+                if result.overflow {
+                    return entry.delta >= 0 ? Int64.max : Int64.min
+                }
+                return result.partialValue
+            }
         }
         
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -396,9 +439,9 @@ final class StarsStatisticsScreenComponent: Component {
                     }
                     self.starsState = state.stats
                     if component.peerId == component.context.account.peerId && miraSettings.fakeStarsEnabled {
-                        self.fakeStarsBalance = fakeStarsLedger.balance
+                        self.fakeStarsLedger = fakeStarsLedger
                     } else {
-                        self.fakeStarsBalance = nil
+                        self.fakeStarsLedger = nil
                     }
                     
                     if !self.isUpdating {
@@ -442,7 +485,10 @@ final class StarsStatisticsScreenComponent: Component {
                 transition.setBounds(view: titleView, bounds: CGRect(origin: .zero, size: titleSize))
             }
             
-            if let revenueGraph = self.starsState?.revenueGraph {
+            let isUsingLocalStars = self.fakeStarsLedger != nil
+            let localGraph = self.fakeStarsLedger.map { self.localStarsGraph($0, title: strings.Stars_BotRevenue_Revenue_Title) }
+            let revenueGraph = isUsingLocalStars ? localGraph : self.starsState?.revenueGraph
+            if let revenueGraph, !revenueGraph.isEmpty {
                 let chartSize = self.chartView.update(
                     transition: .immediate,
                     component: AnyComponent(ListSectionComponent(
@@ -479,10 +525,11 @@ final class StarsStatisticsScreenComponent: Component {
                 contentHeight += 44.0
             }
             
-            let effectiveFakeBalance = self.fakeStarsBalance.map { StarsAmount(value: $0, nanos: 0) }
+            let effectiveFakeBalance = self.fakeStarsLedger.map { StarsAmount(value: $0.balance, nanos: 0) }
+            let localTotalRevenue = self.fakeStarsLedger.map { self.localStarsTotalRevenue($0) }
             let availableBalance = effectiveFakeBalance.map { CurrencyAmount(amount: $0, currency: .stars) } ?? starsState?.balances.availableBalance ?? CurrencyAmount(amount: .zero, currency: .stars)
             let currentBalance = effectiveFakeBalance.map { CurrencyAmount(amount: $0, currency: .stars) } ?? starsState?.balances.currentBalance ?? CurrencyAmount(amount: .zero, currency: .stars)
-            let overallRevenue = effectiveFakeBalance.map { CurrencyAmount(amount: $0, currency: .stars) } ?? starsState?.balances.overallRevenue ?? CurrencyAmount(amount: .zero, currency: .stars)
+            let overallRevenue = isUsingLocalStars ? CurrencyAmount(amount: StarsAmount(value: localTotalRevenue ?? 0, nanos: 0), currency: .stars) : (starsState?.balances.overallRevenue ?? CurrencyAmount(amount: .zero, currency: .stars))
 
             let proceedsSize = self.proceedsView.update(
                 transition: .immediate,
@@ -517,7 +564,7 @@ final class StarsStatisticsScreenComponent: Component {
                             theme: environment.theme,
                             dateTimeFormat: environment.dateTimeFormat,
                             title: strings.Stars_BotRevenue_Proceeds_Current,
-                            value: currentBalance,
+                            value: effectiveFakeBalance.map { CurrencyAmount(amount: $0, currency: .stars) } ?? currentBalance,
                             rate: starsState?.usdRate ?? 0.0
                         ))),
                         AnyComponentWithIdentity(id: 2, component: AnyComponent(StarsOverviewItemComponent(
@@ -560,19 +607,22 @@ final class StarsStatisticsScreenComponent: Component {
                         
             var balanceItems: [AnyComponentWithIdentity<Empty>] = []
             if component.peerId == component.context.account.peerId {
-                let withdrawEnabled = self.starsState?.balances.withdrawEnabled ?? false
+                // A local Stars projection has no server withdrawal path. Use
+                // its account-local balance consistently and keep the real
+                // withdrawal action disabled while that projection is active.
+                let withdrawEnabled = effectiveFakeBalance == nil && (self.starsState?.balances.withdrawEnabled ?? false)
                 balanceItems = [
                     AnyComponentWithIdentity(id: 0, component: AnyComponent(
                         StarsBalanceComponent(
                             theme: environment.theme,
                             strings: strings,
                             dateTimeFormat: environment.dateTimeFormat,
-                            count: self.starsState?.balances.availableBalance.amount ?? StarsAmount.zero,
+                            count: effectiveFakeBalance ?? self.starsState?.balances.availableBalance.amount ?? StarsAmount.zero,
                             currency: .stars,
                             rate: self.starsState?.usdRate ?? 0,
                             actionTitle: strings.Stars_Intro_Withdraw,
                             actionAvailable: withdrawEnabled,
-                            actionIsEnabled: true,
+                            actionIsEnabled: effectiveFakeBalance == nil,
                             actionCooldownUntilTimestamp: self.starsState?.balances.nextWithdrawalTimestamp,
                             actionIcon: PresentationResourcesItemList.itemListRoundWithdrawIcon(environment.theme),
                             action: { [weak self] in
@@ -603,7 +653,7 @@ final class StarsStatisticsScreenComponent: Component {
                             theme: environment.theme,
                             strings: strings,
                             dateTimeFormat: environment.dateTimeFormat,
-                            count: self.starsState?.balances.availableBalance.amount ?? StarsAmount.zero,
+                            count: effectiveFakeBalance ?? self.starsState?.balances.availableBalance.amount ?? StarsAmount.zero,
                             currency: .stars,
                             rate: self.starsState?.usdRate ?? 0,
                             actionTitle: strings.Stars_BotRevenue_Withdraw_WithdrawShort,

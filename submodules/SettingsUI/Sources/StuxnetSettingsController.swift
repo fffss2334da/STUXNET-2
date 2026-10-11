@@ -1644,7 +1644,6 @@ private enum StuxnetFakeEntry: ItemListNodeEntry {
                     settings.fakeRatingValue
                 }, range: 0 ... Int64.max, updateValue: { settings, value in
                     settings.fakeRatingValue = value
-                    settings.fakeRatingLevel = MiraSettings.starRatingLevel(forStars: value)
                 }, footer: "Enter the total rating value. The displayed Telegram-style level is calculated automatically from this value."))
             })
         }
@@ -1670,8 +1669,7 @@ private func stuxnetFakeEntries(settings: MiraSettings, ledgerBalance: Int64? = 
     entries.append(.ratingHeader("Rating".uppercased()))
     entries.append(.fakeRatingEnabled(settings.fakeRatingEnabled))
     let ratingValue = settings.fakeRatingValue
-    let ratingLevel = settings.effectiveFakeRatingLevel
-    entries.append(.fakeRatingValue("\(stuxnetFormattedNumber(ratingValue)) · Level \(ratingLevel)"))
+    entries.append(.fakeRatingValue("\(stuxnetFormattedNumber(ratingValue)) · Level \(settings.fakeRatingLevel)"))
     return entries
 }
 
@@ -1912,6 +1910,9 @@ private enum StuxnetVoiceChangerEntry: ItemListNodeEntry {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Voice Changer", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.voiceChangerEnabled = value
+                    if value && settings.voiceChangerPreset == 0 {
+                        settings.voiceChangerPreset = MiraSettings.defaultVoiceChangerPreset
+                    }
                 }
             })
         case let .preset(label):
@@ -2012,13 +2013,14 @@ private enum StuxnetAppearanceEntry: ItemListNodeEntry {
     case compactChatList(Bool)
     case compactChatFolders(Bool)
     case videoMessagesUseBackCamera(Bool)
+    case videoMessagesUse60Fps(Bool)
     case interfaceFont(String)
     case avatarCorners(String)
     case socialVideoEnabled(Bool)
     case socialVideoWifiOnly(Bool)
     case socialVideoConfirm(Bool)
-    case socialVideoQuality(String)
-    case socialVideoDestination(String)
+    case socialVideoQuality(MiraSocialVideoQuality)
+    case socialVideoDestination(MiraSocialVideoDestination)
     case socialVideoPlatform(MiraSocialVideoPlatform, Bool)
 
     var section: ItemListSectionId {
@@ -2039,22 +2041,24 @@ private enum StuxnetAppearanceEntry: ItemListNodeEntry {
             return 4
         case .videoMessagesUseBackCamera:
             return 5
-        case .interfaceFont:
+        case .videoMessagesUse60Fps:
             return 6
-        case .avatarCorners:
+        case .interfaceFont:
             return 7
-        case .socialVideoEnabled:
+        case .avatarCorners:
             return 8
-        case .socialVideoWifiOnly:
+        case .socialVideoEnabled:
             return 9
-        case .socialVideoConfirm:
+        case .socialVideoWifiOnly:
             return 10
-        case .socialVideoQuality:
+        case .socialVideoConfirm:
             return 11
-        case .socialVideoDestination:
+        case .socialVideoQuality:
             return 12
+        case .socialVideoDestination:
+            return 13
         case let .socialVideoPlatform(platform, _):
-            return 13 + Int(platform.rawValue)
+            return 14 + Int(platform.rawValue)
         }
     }
 
@@ -2101,6 +2105,13 @@ private enum StuxnetAppearanceEntry: ItemListNodeEntry {
                     settings.videoMessagesUseBackCamera = value
                 }
             })
+        case let .videoMessagesUse60Fps(value):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Кружки: до 60 кадров/с" : "Round videos: up to 60 FPS", value: value, sectionId: self.section, style: .blocks, updated: { value in
+                arguments.updateSettings { settings in
+                    settings.videoMessagesUse60Fps = value
+                }
+            })
         case let .interfaceFont(label):
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Interface Font", label: label, sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetOptionsPickerController(context: arguments.context, title: "Interface Font", options: (0 ... 14).map { (Int64($0), stuxnetInterfaceFontOptionName(Int32($0))) }, currentValue: { settings in
@@ -2120,34 +2131,39 @@ private enum StuxnetAppearanceEntry: ItemListNodeEntry {
                 }))
             })
         case let .socialVideoEnabled(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Social Video Links", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Видео из соцсетей" : "Social Video Links", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.socialVideoSettings.enabled = value
                 }
             })
         case let .socialVideoWifiOnly(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Wi-Fi Only", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Только Wi-Fi" : "Wi-Fi Only", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.socialVideoSettings.wifiOnly = value
                 }
             })
         case let .socialVideoConfirm(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Confirm before download", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Подтверждать загрузку" : "Confirm before download", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.socialVideoSettings.confirmBeforeDownload = value
                 }
             })
-        case let .socialVideoQuality(label):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Video Quality", label: label, sectionId: self.section, style: .blocks, action: {
-                arguments.pushController(stuxnetOptionsPickerController(context: arguments.context, title: "Video Quality", options: MiraSocialVideoQuality.allCases.map { (Int64($0.rawValue), $0.title) }, currentValue: { settings in
+        case let .socialVideoQuality(value):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Качество видео" : "Video Quality", label: value.title(isRussian: isRussian), sectionId: self.section, style: .blocks, action: {
+                arguments.pushController(stuxnetOptionsPickerController(context: arguments.context, title: isRussian ? "Качество видео" : "Video Quality", options: MiraSocialVideoQuality.allCases.map { (Int64($0.rawValue), $0.title(isRussian: isRussian)) }, currentValue: { settings in
                     return Int64(settings.socialVideoSettings.quality.rawValue)
                 }, updateValue: { settings, value in
                     settings.socialVideoSettings.quality = MiraSocialVideoQuality(rawValue: Int32(value)) ?? .source
                 }))
             })
-        case let .socialVideoDestination(label):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Save to", label: label, sectionId: self.section, style: .blocks, action: {
-                arguments.pushController(stuxnetOptionsPickerController(context: arguments.context, title: "After downloading", options: MiraSocialVideoDestination.allCases.map { (Int64($0.rawValue), $0.title) }, currentValue: { settings in
+        case let .socialVideoDestination(value):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Сохранять в" : "Save to", label: value.title(isRussian: isRussian), sectionId: self.section, style: .blocks, action: {
+                arguments.pushController(stuxnetOptionsPickerController(context: arguments.context, title: isRussian ? "После загрузки" : "After downloading", options: MiraSocialVideoDestination.selectionOrder.map { (Int64($0.rawValue), $0.title(isRussian: isRussian)) }, currentValue: { settings in
                     return Int64(settings.socialVideoSettings.destination.rawValue)
                 }, updateValue: { settings, value in
                     settings.socialVideoSettings.destination = MiraSocialVideoDestination(rawValue: Int32(value)) ?? .chat
@@ -2171,12 +2187,14 @@ private func stuxnetAppearanceEntries(settings: MiraSettings) -> [StuxnetAppeara
     entries.append(.compactChatList(settings.compactChatList))
     entries.append(.compactChatFolders(settings.compactChatFolders))
     entries.append(.videoMessagesUseBackCamera(settings.videoMessagesUseBackCamera))
+    entries.append(.videoMessagesUse60Fps(settings.videoMessagesUse60Fps))
     entries.append(.interfaceFont(stuxnetInterfaceFontOptionName(settings.interfaceFont)))
     entries.append(.avatarCorners(stuxnetAvatarCornerStyleName(settings.avatarCornerStyle)))
     entries.append(.socialVideoEnabled(settings.socialVideoSettings.enabled))
     entries.append(.socialVideoWifiOnly(settings.socialVideoSettings.wifiOnly))
     entries.append(.socialVideoConfirm(settings.socialVideoSettings.confirmBeforeDownload))
-    entries.append(.socialVideoQuality(settings.socialVideoSettings.quality.title))
+    entries.append(.socialVideoQuality(settings.socialVideoSettings.quality))
+    entries.append(.socialVideoDestination(settings.socialVideoSettings.destination))
     for platform in MiraSocialVideoPlatform.allCases {
         entries.append(.socialVideoPlatform(platform, settings.socialVideoSettings.isEnabled(platform)))
     }

@@ -1258,7 +1258,7 @@ public class Account {
         self.peerId = peerId
         self.miraMessageHistoryStore = MiraMessageHistoryStore(basePath: basePath)
         MiraMessageHistoryStore.register(accountPeerId: peerId, store: self.miraMessageHistoryStore)
-        self.miraFakeGiftsStore = MiraFakeGiftsStore(basePath: basePath)
+        self.miraFakeGiftsStore = MiraFakeGiftsStore(basePath: basePath, accountPeerId: peerId)
         MiraFakeGiftsStore.register(accountPeerId: peerId, store: self.miraFakeGiftsStore)
         self.miraFakeChannelsStore = MiraFakeChannelsStore(basePath: basePath)
         MiraFakeChannelsStore.register(accountPeerId: peerId, store: self.miraFakeChannelsStore)

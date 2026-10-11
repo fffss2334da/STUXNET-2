@@ -1188,6 +1188,7 @@ private final class StarsTransactionsContextImpl {
     private let disposable = MetaDisposable()
     private var stateDisposable: Disposable?
     private var ledgerDisposable: Disposable?
+    private var gateDisposable: Disposable?
     
     init(account: Account, subject: StarsTransactionsContext.Subject, mode: StarsTransactionsContext.Mode) {
         assert(Queue.mainQueue().isCurrent())
@@ -1265,17 +1266,12 @@ private final class StarsTransactionsContextImpl {
         // message, gift conversion, or transfer fee is edited/deleted.
         self.ledgerDisposable = (account.miraFakeStarsLedger.changes
         |> deliverOnMainQueue).start(next: { [weak self] _ in
-            guard let self else {
-                return
-            }
-            let serverTransactions = self._state.transactions.filter { !$0.id.hasPrefix("mira-") }
-            let mergedTransactions = self.mergedTransactions(serverTransactions: serverTransactions)
-            guard mergedTransactions != self._state.transactions else {
-                return
-            }
-            var updatedState = self._state
-            updatedState.transactions = mergedTransactions
-            self.updateState(updatedState)
+            self?.refreshLocalTransactions()
+        })
+
+        self.gateDisposable = (MiraCoreGate.shared.changes(forAccountPeerId: account.peerId)
+        |> deliverOnMainQueue).start(next: { [weak self] _ in
+            self?.refreshLocalTransactions()
         })
     }
     
@@ -1284,6 +1280,7 @@ private final class StarsTransactionsContextImpl {
         self.disposable.dispose()
         self.stateDisposable?.dispose()
         self.ledgerDisposable?.dispose()
+        self.gateDisposable?.dispose()
     }
     
     func loadMore(reload: Bool = false) {
@@ -1333,6 +1330,17 @@ private final class StarsTransactionsContextImpl {
         self._statePromise.set(.single(state))
     }
 
+    private func refreshLocalTransactions() {
+        let serverTransactions = self._state.transactions.filter { !$0.id.hasPrefix("mira-") }
+        let mergedTransactions = self.mergedTransactions(serverTransactions: serverTransactions)
+        guard mergedTransactions != self._state.transactions else {
+            return
+        }
+        var updatedState = self._state
+        updatedState.transactions = mergedTransactions
+        self.updateState(updatedState)
+    }
+
     private func mergedTransactions(serverTransactions: [StarsContext.State.Transaction], existingTransactions: [StarsContext.State.Transaction]? = nil) -> [StarsContext.State.Transaction] {
         let preservedLocal = (existingTransactions ?? self._state.transactions).filter {
             $0.flags.contains(.isLocal) && !$0.id.hasPrefix("mira-")
@@ -1376,46 +1384,60 @@ private final class StarsTransactionsContextImpl {
     }
 
     private func localLedgerTransactions() -> [StarsContext.State.Transaction] {
-        guard !self.ton, self.peerId == self.account.peerId else {
+        guard MiraCoreGate.shared.snapshot(forAccountPeerId: self.account.peerId).fakeStarsEnabled,
+              !self.ton,
+              self.peerId == self.account.peerId else {
             return []
         }
         return self.account.miraFakeStarsLedger.entries.compactMap { entry in
             let flags: StarsContext.State.Transaction.Flags
-            let title: String
+            let title: String?
+            let peer: StarsContext.State.Transaction.Peer
             switch entry.kind {
             case .fakeGiftConversion:
                 flags = [.isLocal, .isGift]
-                title = "Gift converted to Stars"
+                title = nil
+                peer = .premiumBot
             case .fakeGiftTransfer:
                 flags = [.isLocal, .isGift]
-                title = "Gift transfer fee"
+                title = nil
+                peer = .unsupported
             case .fakeStarsMessage:
                 flags = [.isLocal, .isPaidMessage]
-                title = "Paid message"
+                title = nil
+                peer = .unsupported
             case .fakeChannelPost:
                 flags = [.isLocal]
-                title = "Channel post Stars"
+                title = nil
+                peer = .unsupported
             case .fakeChannelReaction:
                 flags = [.isLocal]
-                title = "Channel Stars reactions"
+                title = nil
+                peer = .unsupported
             case .initial:
                 flags = [.isLocal]
-                title = "Fake Stars balance"
+                title = nil
+                peer = .fragment
             case .credit:
                 flags = [.isLocal]
-                title = "Fake Stars credit"
+                title = nil
+                // A local top-up is rendered with Telegram's Fragment
+                // transaction identity so it uses the normal avatar/title
+                // treatment in the real Stars history screen.
+                peer = .fragment
             case .debit:
                 flags = [.isLocal]
-                title = "Fake Stars debit"
+                title = nil
+                peer = .unsupported
             }
             return StarsContext.State.Transaction(
                 flags: flags,
                 id: "mira-\(entry.id)",
                 count: CurrencyAmount(amount: StarsAmount(value: entry.delta, nanos: 0), currency: .stars),
                 date: entry.date,
-                peer: .unsupported,
+                peer: peer,
                 title: title,
-                description: entry.note,
+                description: nil,
                 photo: nil,
                 transactionDate: entry.date,
                 transactionUrl: nil,

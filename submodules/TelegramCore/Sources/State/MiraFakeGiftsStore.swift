@@ -30,6 +30,7 @@ public struct MiraFakeGift: Codable, Equatable {
         case isHidden
         case isSaved
         case showInChat
+        case collectionIds
         case transferStars
         case chatMessagePeerId
         case chatMessageId
@@ -57,8 +58,12 @@ public struct MiraFakeGift: Codable, Equatable {
     public var isHidden: Bool
     public var isSaved: Bool
     public var showInChat: Bool
-    /// Optional local-only transfer fee. Nil preserves the old free-transfer
-    /// behaviour; when set, the fake Stars ledger debits it atomically.
+    /// Server collection ids that this local gift is shown in. The ids are
+    /// only a local projection; collection mutations never send this gift to
+    /// Telegram's payments API.
+    public var collectionIds: [Int32]
+    /// Legacy persisted field. Local collectible transfers use Telegram's
+    /// standard 25-Star fee; older builds could persist an accidental value.
     public var transferStars: Int64?
 
     // Local "gift received" message location, set after insertion so it can be deleted again.
@@ -97,6 +102,7 @@ public struct MiraFakeGift: Codable, Equatable {
         isHidden: Bool = false,
         isSaved: Bool = false,
         showInChat: Bool = true,
+        collectionIds: [Int32] = [],
         transferStars: Int64? = nil,
         chatMessagePeerId: Int64? = nil,
         chatMessageId: Int32? = nil,
@@ -117,10 +123,11 @@ public struct MiraFakeGift: Codable, Equatable {
         self.isHidden = isHidden
         self.isSaved = isSaved
         self.showInChat = showInChat
+        self.collectionIds = Array(Set(collectionIds)).sorted()
         if kind == .regular {
             self.transferStars = nil
         } else {
-            self.transferStars = max(Self.defaultNFTTransferStars, transferStars ?? Self.defaultNFTTransferStars)
+            self.transferStars = Self.defaultNFTTransferStars
         }
         self.chatMessagePeerId = chatMessagePeerId
         self.chatMessageId = chatMessageId
@@ -144,13 +151,15 @@ public struct MiraFakeGift: Codable, Equatable {
         self.isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
         self.isSaved = try container.decodeIfPresent(Bool.self, forKey: .isSaved) ?? false
         self.showInChat = try container.decodeIfPresent(Bool.self, forKey: .showInChat) ?? true
-        let decodedTransferStars = try container.decodeIfPresent(Int64.self, forKey: .transferStars)
+        self.collectionIds = Array(Set(try container.decodeIfPresent([Int32].self, forKey: .collectionIds) ?? [])).sorted()
+        _ = try container.decodeIfPresent(Int64.self, forKey: .transferStars)
         if self.kind == .regular {
             self.transferStars = nil
         } else {
-            // Upgrade legacy local NFT entries that persisted nil/0 when
-            // transfer fees were still optional.
-            self.transferStars = max(Self.defaultNFTTransferStars, decodedTransferStars ?? Self.defaultNFTTransferStars)
+            // The field was user editable in an earlier build and could
+            // retain bogus amounts (for example 1000 Stars). Local collectible
+            // transfers follow Telegram's fixed transfer fee.
+            self.transferStars = Self.defaultNFTTransferStars
         }
         self.chatMessagePeerId = try container.decodeIfPresent(Int64.self, forKey: .chatMessagePeerId)
         self.chatMessageId = try container.decodeIfPresent(Int32.self, forKey: .chatMessageId)
@@ -208,12 +217,44 @@ public struct MiraFakeGift: Codable, Equatable {
 }
 
 public struct MiraFakeGiftsSnapshot: Codable, Equatable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
     public let schemaVersion: Int
     public let gifts: [MiraFakeGift]
+    public let collections: [MiraFakeGiftCollection]
 
-    public init(schemaVersion: Int = MiraFakeGiftsSnapshot.currentSchemaVersion, gifts: [MiraFakeGift] = []) {
+    public init(schemaVersion: Int = MiraFakeGiftsSnapshot.currentSchemaVersion, gifts: [MiraFakeGift] = [], collections: [MiraFakeGiftCollection] = []) {
         self.schemaVersion = schemaVersion
+        self.gifts = gifts
+        self.collections = collections
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case gifts
+        case collections
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 0
+        self.gifts = try container.decodeIfPresent([MiraFakeGift].self, forKey: .gifts) ?? []
+        self.collections = try container.decodeIfPresent([MiraFakeGiftCollection].self, forKey: .collections) ?? []
+    }
+}
+
+/// A collection that exists only in this account's local gift projection.
+/// Negative ids are reserved for local collections and cannot be mistaken for
+/// Telegram collection ids.
+public struct MiraFakeGiftCollection: Codable, Equatable {
+    public let id: Int32
+    public let ownerPeerId: Int64
+    public var title: String
+    public var gifts: [ProfileGiftsContext.State.StarGift]
+
+    public init(id: Int32, ownerPeerId: Int64, title: String, gifts: [ProfileGiftsContext.State.StarGift]) {
+        self.id = id
+        self.ownerPeerId = ownerPeerId
+        self.title = title
         self.gifts = gifts
     }
 }
@@ -240,22 +281,43 @@ public final class MiraFakeGiftsStore {
     // their callback, and that would synchronously wait on this queue again.
     private let publicationQueue = DispatchQueue(label: "org.telegram.mira.fakeGiftsStore.publication", qos: .utility)
     private let filePath: String
+    private let accountPeerId: PeerId?
     private var cache: [MiraFakeGift] = []
+    private var collectionsCache: [MiraFakeGiftCollection] = []
     private var didLoad = false
     private var needsMigrationWrite = false
     private var readOnly = false
 
     private let changesPromise = ValuePromise<[MiraFakeGift]>([], ignoreRepeated: true)
+    private let collectionsChangesPromise = ValuePromise<[MiraFakeGiftCollection]>([], ignoreRepeated: true)
+
+    /// Keep the local editor and every persisted projection on one transfer
+    /// contract. Older builds allowed an arbitrary Stars amount (including
+    /// 1000) to leak into a fake NFT; Telegram's local emulation uses the
+    /// standard 25-Star transfer price instead.
+    private func normalizedForStorage(_ gift: MiraFakeGift) -> MiraFakeGift {
+        var normalized = gift
+        if normalized.isUnique {
+            normalized.transferStars = MiraFakeGift.defaultNFTTransferStars
+        } else {
+            normalized.transferStars = nil
+        }
+        normalized.collectionIds = Array(Set(normalized.collectionIds)).sorted()
+        return normalized
+    }
 
     private func publishLocked() {
         let snapshot = self.cache
+        let collectionsSnapshot = self.collectionsCache
         self.publicationQueue.async { [weak self] in
             self?.changesPromise.set(snapshot)
+            self?.collectionsChangesPromise.set(collectionsSnapshot)
         }
     }
 
-    public init(basePath: String) {
+    public init(basePath: String, accountPeerId: PeerId? = nil) {
         self.filePath = basePath + "/mira-fake-gifts.json"
+        self.accountPeerId = accountPeerId
     }
 
     private func loadIfNeeded() {
@@ -269,8 +331,15 @@ public final class MiraFakeGiftsStore {
         }
         if let snapshot = try? JSONDecoder().decode(MiraFakeGiftsSnapshot.self, from: data) {
             self.readOnly = snapshot.schemaVersion > MiraFakeGiftsSnapshot.currentSchemaVersion
-            self.needsMigrationWrite = snapshot.schemaVersion < MiraFakeGiftsSnapshot.currentSchemaVersion
-            self.cache = snapshot.gifts
+            var normalizedGifts = snapshot.gifts
+            for index in normalizedGifts.indices where normalizedGifts[index].isUnique {
+                if normalizedGifts[index].transferStars != MiraFakeGift.defaultNFTTransferStars {
+                    normalizedGifts[index].transferStars = MiraFakeGift.defaultNFTTransferStars
+                }
+            }
+            self.needsMigrationWrite = snapshot.schemaVersion < MiraFakeGiftsSnapshot.currentSchemaVersion || normalizedGifts != snapshot.gifts
+            self.cache = normalizedGifts
+            self.collectionsCache = snapshot.collections.filter { $0.id < 0 }
         } else if let gifts = try? JSONDecoder().decode([MiraFakeGift].self, from: data) {
             // Older builds could append the same entry more than once when an edit
             // raced an asynchronous insert. Keep the newest copy by id so the
@@ -286,6 +355,7 @@ public final class MiraFakeGiftsStore {
                 }
             }
             self.cache = uniqueGifts
+            self.collectionsCache = []
             self.needsMigrationWrite = true
         } else {
             // Never overwrite an unreadable local file with an empty cache.
@@ -302,7 +372,7 @@ public final class MiraFakeGiftsStore {
 
     @discardableResult
     private func saveLocked() -> Bool {
-        guard let data = try? JSONEncoder().encode(MiraFakeGiftsSnapshot(gifts: self.cache)) else {
+        guard let data = try? JSONEncoder().encode(MiraFakeGiftsSnapshot(gifts: self.cache, collections: self.collectionsCache)) else {
             return false
         }
         do {
@@ -335,6 +405,251 @@ public final class MiraFakeGiftsStore {
         }
     }
 
+    public var collectionsChanges: Signal<[MiraFakeGiftCollection], NoError> {
+        return Signal { [weak self] subscriber in
+            guard let self else {
+                return EmptyDisposable
+            }
+            let disposable = self.collectionsChangesPromise.get().start(next: { value in
+                subscriber.putNext(value)
+            })
+            self.queue.async {
+                self.loadIfNeeded()
+            }
+            return disposable
+        }
+    }
+
+    public func localCollections(ownerPeerId: PeerId) -> [MiraFakeGiftCollection] {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            return self.collectionsCache.filter { $0.ownerPeerId == ownerPeerId.toInt64() }
+        }
+    }
+
+    public func localCollection(id: Int32, ownerPeerId: PeerId) -> MiraFakeGiftCollection? {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            return self.collectionsCache.first(where: { $0.id == id && $0.ownerPeerId == ownerPeerId.toInt64() })
+        }
+    }
+
+    @discardableResult
+    public func createLocalCollection(ownerPeerId: PeerId, title: String, gifts: [ProfileGiftsContext.State.StarGift]) -> MiraFakeGiftCollection? {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            guard !self.readOnly else {
+                return nil
+            }
+            let trimmedTitle = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12))
+            guard !trimmedTitle.isEmpty else {
+                return nil
+            }
+            let ownerCollections = self.collectionsCache.filter { $0.ownerPeerId == ownerPeerId.toInt64() }
+            let smallestId = ownerCollections.map(\.id).filter { $0 < 0 }.min() ?? 0
+            guard smallestId > Int32.min else {
+                return nil
+            }
+            let collectionId = smallestId - 1
+            let normalizedGifts = self.uniqueCollectionGifts(gifts).map { gift in
+                var collectionIds = gift.collectionIds ?? []
+                if !collectionIds.contains(collectionId) {
+                    collectionIds.append(collectionId)
+                }
+                return gift.withCollectionIds(collectionIds)
+            }
+            let collection = MiraFakeGiftCollection(id: collectionId, ownerPeerId: ownerPeerId.toInt64(), title: trimmedTitle, gifts: normalizedGifts)
+            let previousCollections = self.collectionsCache
+            let previousGifts = self.cache
+            self.collectionsCache.append(collection)
+            self.updateStoredFakeGiftCollectionMembership(ownerPeerId: ownerPeerId, collectionId: collectionId, gifts: normalizedGifts)
+            guard self.saveLocked() else {
+                self.collectionsCache = previousCollections
+                self.cache = previousGifts
+                return nil
+            }
+            self.publishLocked()
+            return collection
+        }
+    }
+
+    @discardableResult
+    public func updateLocalCollection(ownerPeerId: PeerId, collectionId: Int32, title: String? = nil, gifts: [ProfileGiftsContext.State.StarGift]? = nil) -> MiraFakeGiftCollection? {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            guard !self.readOnly,
+                  let index = self.collectionsCache.firstIndex(where: { $0.id == collectionId && $0.ownerPeerId == ownerPeerId.toInt64() }) else {
+                return nil
+            }
+            let previousCollections = self.collectionsCache
+            let previousGifts = self.cache
+            let oldCollection = self.collectionsCache[index]
+            let updatedTitle = title.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12)) } ?? oldCollection.title
+            guard !updatedTitle.isEmpty else {
+                return nil
+            }
+            let updatedGifts = self.uniqueCollectionGifts(gifts ?? oldCollection.gifts).map { gift in
+                var collectionIds = (gift.collectionIds ?? []).filter { $0 != collectionId }
+                collectionIds.append(collectionId)
+                return gift.withCollectionIds(collectionIds)
+            }
+            let collection = MiraFakeGiftCollection(id: collectionId, ownerPeerId: ownerPeerId.toInt64(), title: updatedTitle, gifts: updatedGifts)
+            self.collectionsCache[index] = collection
+            self.updateStoredFakeGiftCollectionMembership(ownerPeerId: ownerPeerId, collectionId: collectionId, gifts: oldCollection.gifts, remove: true)
+            self.updateStoredFakeGiftCollectionMembership(ownerPeerId: ownerPeerId, collectionId: collectionId, gifts: updatedGifts)
+            guard self.saveLocked() else {
+                self.collectionsCache = previousCollections
+                self.cache = previousGifts
+                return nil
+            }
+            self.publishLocked()
+            return collection
+        }
+    }
+
+    @discardableResult
+    public func deleteLocalCollection(ownerPeerId: PeerId, collectionId: Int32) -> Bool {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            guard !self.readOnly,
+                  let index = self.collectionsCache.firstIndex(where: { $0.id == collectionId && $0.ownerPeerId == ownerPeerId.toInt64() }) else {
+                return false
+            }
+            let previousCollections = self.collectionsCache
+            let previousGifts = self.cache
+            let collection = self.collectionsCache.remove(at: index)
+            self.updateStoredFakeGiftCollectionMembership(ownerPeerId: ownerPeerId, collectionId: collectionId, gifts: collection.gifts, remove: true)
+            guard self.saveLocked() else {
+                self.collectionsCache = previousCollections
+                self.cache = previousGifts
+                return false
+            }
+            self.publishLocked()
+            return true
+        }
+    }
+
+    public func reorderLocalCollections(ownerPeerId: PeerId, ids: [Int32]) {
+        self.queue.async {
+            self.loadIfNeeded()
+            guard !self.readOnly else {
+                return
+            }
+            let ownerValue = ownerPeerId.toInt64()
+            let ownerCollections = self.collectionsCache.filter { $0.ownerPeerId == ownerValue }
+            let ownerMap = Dictionary(uniqueKeysWithValues: ownerCollections.map { ($0.id, $0) })
+            var ordered = ids.compactMap { ownerMap[$0] }
+            let included = Set(ordered.map(\.id))
+            ordered.append(contentsOf: ownerCollections.filter { !included.contains($0.id) })
+            var iterator = ordered.makeIterator()
+            self.collectionsCache = self.collectionsCache.map { collection in
+                collection.ownerPeerId == ownerValue ? (iterator.next() ?? collection) : collection
+            }
+            guard self.saveLocked() else {
+                self.loadIfNeeded()
+                return
+            }
+            self.publishLocked()
+        }
+    }
+
+    @discardableResult
+    public func updateFakeGiftCollectionMembership(ownerPeerId: PeerId, collectionId: Int32, references: [StarGiftReference], added: Bool) -> Bool {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            guard !self.readOnly else {
+                return false
+            }
+            let ids = Set(references.compactMap { reference -> Int64? in
+                guard case let .peer(peerId, savedId) = reference,
+                      peerId == self.accountPeerId,
+                      MiraFakeGift.isLocalSavedId(savedId) else {
+                    return nil
+                }
+                return savedId
+            })
+            guard !ids.isEmpty else {
+                return true
+            }
+            let previous = self.cache
+            for index in self.cache.indices where ids.contains(self.cache[index].stableSavedId) {
+                let storedOwner = self.cache[index].ownerPeerId ?? self.accountPeerId?.toInt64()
+                guard let storedOwner, storedOwner == ownerPeerId.toInt64() else {
+                    continue
+                }
+                if added {
+                    if !self.cache[index].collectionIds.contains(collectionId) {
+                        self.cache[index].collectionIds.append(collectionId)
+                    }
+                } else {
+                    self.cache[index].collectionIds.removeAll(where: { $0 == collectionId })
+                }
+            }
+            guard self.cache != previous else {
+                return true
+            }
+            guard self.saveLocked() else {
+                self.cache = previous
+                return false
+            }
+            self.publishLocked()
+            return true
+        }
+    }
+
+    private func uniqueCollectionGifts(_ gifts: [ProfileGiftsContext.State.StarGift]) -> [ProfileGiftsContext.State.StarGift] {
+        var seen = Set<String>()
+        return gifts.filter { gift in
+            guard let reference = gift.reference else {
+                return false
+            }
+            return seen.insert(reference.stringValue).inserted
+        }
+    }
+
+    private func updateStoredFakeGiftCollectionMembership(ownerPeerId: PeerId, collectionId: Int32, gifts: [ProfileGiftsContext.State.StarGift], remove: Bool = false) {
+        let savedIds = Set(gifts.compactMap { gift -> Int64? in
+            guard case let .peer(peerId, savedId)? = gift.reference,
+                  peerId == self.accountPeerId,
+                  MiraFakeGift.isLocalSavedId(savedId) else {
+                return nil
+            }
+            return savedId
+        })
+        for index in self.cache.indices {
+            let entryOwner = self.cache[index].ownerPeerId ?? self.accountPeerId?.toInt64()
+            guard entryOwner == ownerPeerId.toInt64(), savedIds.contains(self.cache[index].stableSavedId) else {
+                continue
+            }
+            if remove {
+                self.cache[index].collectionIds.removeAll(where: { $0 == collectionId })
+            } else if !self.cache[index].collectionIds.contains(collectionId) {
+                self.cache[index].collectionIds.append(collectionId)
+            }
+        }
+    }
+
+    private func pruneDeletedFakeGiftsFromCollectionsLocked() {
+        guard let accountPeerId = self.accountPeerId else {
+            return
+        }
+        let entriesBySavedId = Dictionary(uniqueKeysWithValues: self.cache.map { ($0.stableSavedId, $0) })
+        for collectionIndex in self.collectionsCache.indices {
+            let ownerPeerId = self.collectionsCache[collectionIndex].ownerPeerId
+            self.collectionsCache[collectionIndex].gifts.removeAll { gift in
+                guard case let .peer(peerId, savedId)? = gift.reference,
+                      peerId == accountPeerId,
+                      MiraFakeGift.isLocalSavedId(savedId) else {
+                    return false
+                }
+                guard let entry = entriesBySavedId[savedId] else {
+                    return true
+                }
+                return (entry.ownerPeerId ?? accountPeerId.toInt64()) != ownerPeerId
+            }
+        }
+    }
+
     public var isReadOnly: Bool {
         return self.queue.sync {
             self.loadIfNeeded()
@@ -354,13 +669,14 @@ public final class MiraFakeGiftsStore {
     /// Fake gift settings are edited from an asynchronous UI flow, so treating
     /// update as a strict "must already exist" operation can silently lose edits.
     public func upsert(_ gift: MiraFakeGift) {
+        let normalizedGift = self.normalizedForStorage(gift)
         self.queue.async {
             self.loadIfNeeded()
             guard !self.readOnly else { return }
-            if let index = self.cache.firstIndex(where: { $0.id == gift.id }) {
-                self.cache[index] = gift
+            if let index = self.cache.firstIndex(where: { $0.id == normalizedGift.id }) {
+                self.cache[index] = normalizedGift
             } else {
-                self.cache.append(gift)
+                self.cache.append(normalizedGift)
             }
             self.saveLocked()
             self.publishLocked()
@@ -372,6 +688,7 @@ public final class MiraFakeGiftsStore {
     /// deleting their source entry so a process interruption cannot lose the
     /// recipient copy after the source has been removed.
     private func upsertSignal(_ gift: MiraFakeGift) -> Signal<Void, NoError> {
+        let normalizedGift = self.normalizedForStorage(gift)
         return Signal { [weak self] subscriber in
             guard let self else {
                 subscriber.putCompletion()
@@ -383,10 +700,10 @@ public final class MiraFakeGiftsStore {
                     subscriber.putCompletion()
                     return
                 }
-                if let index = self.cache.firstIndex(where: { $0.id == gift.id }) {
-                    self.cache[index] = gift
+                if let index = self.cache.firstIndex(where: { $0.id == normalizedGift.id }) {
+                    self.cache[index] = normalizedGift
                 } else {
-                    self.cache.append(gift)
+                    self.cache.append(normalizedGift)
                 }
                 self.saveLocked()
                 self.publishLocked()
@@ -403,23 +720,24 @@ public final class MiraFakeGiftsStore {
     /// same idempotent replacement semantics as `upsert`.
     @discardableResult
     public func upsertAndWait(_ gift: MiraFakeGift) -> Bool {
+        let normalizedGift = self.normalizedForStorage(gift)
         return self.queue.sync {
             self.loadIfNeeded()
             guard !self.readOnly else { return false }
             let previousCache = self.cache
-            if let index = self.cache.firstIndex(where: { $0.id == gift.id }) {
+            if let index = self.cache.firstIndex(where: { $0.id == normalizedGift.id }) {
                 // A pending transfer intent is a compare-and-set value. Two
                 // UI taps can race before either callback returns; once the
                 // first tap binds a recipient, a second tap may only replay
                 // that same recipient and cannot redirect the gift.
                 let existing = self.cache[index]
                 if let existingRecipient = existing.pendingTransferRecipientPeerId,
-                   existingRecipient != gift.pendingTransferRecipientPeerId {
+                   existingRecipient != normalizedGift.pendingTransferRecipientPeerId {
                     return false
                 }
-                self.cache[index] = gift
+                self.cache[index] = normalizedGift
             } else {
-                self.cache.append(gift)
+                self.cache.append(normalizedGift)
             }
             guard self.saveLocked() else {
                 self.cache = previousCache
@@ -435,6 +753,7 @@ public final class MiraFakeGiftsStore {
             self.loadIfNeeded()
             guard !self.readOnly else { return }
             self.cache.removeAll(where: { $0.id == id })
+            self.pruneDeletedFakeGiftsFromCollectionsLocked()
             self.saveLocked()
             self.publishLocked()
         }
@@ -456,10 +775,14 @@ public final class MiraFakeGiftsStore {
                     return
                 }
                 let previousCount = self.cache.count
+                let previousCollections = self.collectionsCache
                 self.cache.removeAll(where: { $0.id == id })
                 if self.cache.count != previousCount {
+                    self.pruneDeletedFakeGiftsFromCollectionsLocked()
                     self.saveLocked()
                     self.publishLocked()
+                } else {
+                    self.collectionsCache = previousCollections
                 }
                 subscriber.putCompletion()
             }
@@ -476,10 +799,13 @@ public final class MiraFakeGiftsStore {
             self.loadIfNeeded()
             guard !self.readOnly else { return false }
             let previousCache = self.cache
+            let previousCollections = self.collectionsCache
             self.cache.removeAll(where: { $0.id == id })
             guard self.cache != previousCache else { return true }
+            self.pruneDeletedFakeGiftsFromCollectionsLocked()
             guard self.saveLocked() else {
                 self.cache = previousCache
+                self.collectionsCache = previousCollections
                 return false
             }
             self.publishLocked()
@@ -498,6 +824,7 @@ public final class MiraFakeGiftsStore {
             self.loadIfNeeded()
             guard !self.readOnly else { return }
             let previousCount = self.cache.count
+            let previousCollections = self.collectionsCache
             self.cache.removeAll { entry in
                 guard let packedPeerId = entry.chatMessagePeerId,
                       let messageId = entry.chatMessageId,
@@ -509,6 +836,7 @@ public final class MiraFakeGiftsStore {
             guard self.cache.count != previousCount else {
                 return
             }
+            self.pruneDeletedFakeGiftsFromCollectionsLocked()
             self.saveLocked()
             self.publishLocked()
         }
@@ -577,6 +905,7 @@ public final class MiraFakeGiftsStore {
             guard !self.readOnly else { return }
             self.didLoad = true
             self.cache.removeAll()
+            self.collectionsCache.removeAll()
             try? FileManager.default.removeItem(atPath: self.filePath)
             self.publishLocked()
         }
@@ -618,7 +947,7 @@ extension MiraFakeGiftsStore {
     /// is account-local, but a fake transfer can assign ownership to another
     /// peer on this device; filtering by the requested profile keeps the
     /// recipient's gift shelf and the account's own shelf consistent.
-    public func resolvedProfileGifts(account: Account, entries: [MiraFakeGift], ownerPeerId: PeerId) -> Signal<[ProfileGiftsContext.State.StarGift], NoError> {
+    public func resolvedProfileGifts(account: Account, entries: [MiraFakeGift], ownerPeerId: PeerId, collectionId: Int32? = nil) -> Signal<[ProfileGiftsContext.State.StarGift], NoError> {
         let ownedEntries = entries.filter { entry in
             guard let storedOwnerPeerId = entry.ownerPeerId else {
                 return ownerPeerId == account.peerId
@@ -626,7 +955,13 @@ extension MiraFakeGiftsStore {
             guard let owner = MiraFakeGift.peerId(fromStoredValue: storedOwnerPeerId, isPacked: true) else {
                 return false
             }
-            return owner == ownerPeerId
+            guard owner == ownerPeerId else {
+                return false
+            }
+            if let collectionId {
+                return entry.collectionIds.contains(collectionId)
+            }
+            return true
         }
         if ownedEntries.isEmpty {
             return .single([])
@@ -784,7 +1119,7 @@ extension MiraFakeGiftsStore {
                     transferStars: entry.isUnique ? (entry.transferStars ?? MiraFakeGift.defaultNFTTransferStars) : nil,
                     canTransferDate: nil,
                     canResaleDate: nil,
-                    collectionIds: nil,
+                    collectionIds: entry.collectionIds.isEmpty ? nil : entry.collectionIds,
                     prepaidUpgradeHash: nil,
                     upgradeSeparate: false,
                     dropOriginalDetailsStars: nil,
@@ -1076,6 +1411,7 @@ extension MiraFakeGiftsStore {
             self.queue.async { [weak self] in
                 self?.loadIfNeeded()
                 self?.cache.removeAll(where: { $0.stableSavedId == savedId })
+                self?.pruneDeletedFakeGiftsFromCollectionsLocked()
                 self?.saveLocked()
                 self?.publishLocked()
             }
