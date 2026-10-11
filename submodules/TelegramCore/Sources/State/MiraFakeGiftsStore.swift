@@ -1071,13 +1071,16 @@ extension MiraFakeGiftsStore {
         guard case let .peer(peerId, savedId) = reference,
               peerId == account.peerId,
               MiraFakeGift.isLocalSavedId(savedId),
-              let source = self.list().first(where: { $0.stableSavedId == savedId }),
-              source.isUnique,
-              source.giftSnapshot != nil else {
-            // A local NFT without its catalog snapshot cannot produce a
-            // Telegram-shaped action message. Keep the source and Stars
-            // balance intact until the editor resolves the gift.
+              var source = self.list().first(where: { $0.stableSavedId == savedId }),
+              source.isUnique else {
             return .fail(.generic)
+        }
+        // A persisted uniqueById entry may not have a catalog snapshot after
+        // restart or while offline. Use the same deterministic local
+        // projection as the profile path so transfer still produces a
+        // Telegram-shaped local action and remains fully account-local.
+        if source.giftSnapshot == nil {
+            source.giftSnapshot = self.offlineUniqueGift(for: source, account: account)
         }
         let transferFee = max(MiraFakeGift.defaultNFTTransferStars, source.transferStars ?? MiraFakeGift.defaultNFTTransferStars)
         let recipientValue = recipientPeerId.toInt64()
