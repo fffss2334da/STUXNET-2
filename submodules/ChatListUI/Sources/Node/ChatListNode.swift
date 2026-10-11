@@ -2182,7 +2182,7 @@ public final class ChatListNode: ListViewImpl {
         }
         |> distinctUntilChanged
         
-        let localProjectionSettings = miraSettingsSignal(accountManager: context.sharedContext.accountManager)
+        let localProjectionSettings: Signal<(Bool, Bool, Bool), NoError> = miraSettingsSignal(accountManager: context.sharedContext.accountManager)
         |> map { settings in
             return (settings.fakeMessagesEnabled, settings.fakeGiftsEnabled, settings.fakeStarsEnabled)
         }

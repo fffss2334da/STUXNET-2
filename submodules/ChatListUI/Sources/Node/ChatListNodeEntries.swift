@@ -4,6 +4,7 @@ import TelegramCore
 import TelegramPresentationData
 import MergeLists
 import AccountContext
+import Postbox
 
 enum ChatListNodeEntryId: Hashable {
     case Header
