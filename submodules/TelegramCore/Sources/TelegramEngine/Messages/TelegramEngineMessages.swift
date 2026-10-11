@@ -56,6 +56,12 @@ private func miraGeneratedUrlEntities(_ text: String) -> [MessageTextEntity] {
                 }
                 let visibleValue = nsText.substring(with: NSRange(location: match.location, length: end - match.location))
                 let normalizedValue = visibleValue.range(of: "://") == nil ? "https://\(visibleValue)" : visibleValue
+                let telegramRange = match.location ..< end
+                // Some system versions return a bare `t.me/...` match from
+                // NSDataDetector as `.Url` without a scheme. Replace that
+                // overlapping entity so the chat opener receives a valid,
+                // normalized https URL instead of a non-actionable string.
+                entities.removeAll { $0.range.overlaps(telegramRange) }
                 append(NSRange(location: match.location, length: end - match.location), type: .TextUrl(url: normalizedValue))
             }
             let nextLocation = match.location + max(match.length, 1)
