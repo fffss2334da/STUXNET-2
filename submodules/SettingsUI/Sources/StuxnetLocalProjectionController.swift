@@ -712,10 +712,8 @@ private enum StuxnetFakeChannelsEntry: ItemListNodeEntry {
 
 public func stuxnetFakeChannelsController(context: AccountContext) -> ViewController {
     var pushControllerImpl: ((ViewController) -> Void)?
-    var attachDisposable: Disposable?
     let store = context.account.miraFakeChannelsStore
     let arguments = StuxnetFakeChannelsArguments(attach: {
-        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let selector = context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(
             context: context,
             title: "Choose Telegram channels",
@@ -731,7 +729,7 @@ public func stuxnetFakeChannelsController(context: AccountContext) -> ViewContro
             alwaysEnabled: true
         ))
         pushControllerImpl?(selector)
-        attachDisposable = (selector.result |> take(1) |> deliverOnMainQueue).start(next: { [weak selector] result in
+        let _ = (selector.result |> take(1) |> deliverOnMainQueue).start(next: { [weak selector] result in
             guard case let .result(peerIds, _) = result else { return }
             let ids = peerIds.compactMap { peerId -> EnginePeer.Id? in
                 if case let .peer(id) = peerId { return id }
