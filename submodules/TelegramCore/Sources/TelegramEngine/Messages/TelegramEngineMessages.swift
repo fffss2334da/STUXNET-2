@@ -216,6 +216,70 @@ private func miraFakeMessageDisplayText(record: FakeMessageRecord, text: String,
     return text
 }
 
+/// Returns the author peer used by a local fake incoming message.  The target
+/// chat is only a fallback when the editor did not provide a sender.  A name
+/// or username entered in the fake-message editor gets a deterministic local
+/// user id so Telegram's normal message renderer does not replace it with the
+/// peer representing the chat itself.
+private func miraFakeMessageAuthorId(authorPeerId: PeerId?, authorName: String?, fallbackPeerId: PeerId) -> PeerId {
+    if let authorPeerId {
+        return authorPeerId
+    }
+    guard let authorName = authorName?.trimmingCharacters(in: .whitespacesAndNewlines), !authorName.isEmpty else {
+        return fallbackPeerId
+    }
+    if let numericId = Int64(authorName), numericId > 0 {
+        return PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(numericId))
+    }
+
+    // Keep synthetic ids away from Telegram's positive user id range while
+    // remaining stable across launches and accounts.
+    var hash: UInt64 = 14695981039346656037
+    for byte in authorName.lowercased().utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 1099511628211
+    }
+    let value = Int64(bitPattern: (hash & 0x1fffffffffffffff) | 0x4000000000000000)
+    return PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(value))
+}
+
+/// Makes the synthetic author available to normal Message/EnginePeer
+/// rendering. It is stored as a regular peer-table row but never included in
+/// the chat list, contacts, or network requests.
+private func miraEnsureFakeMessageAuthor(transaction: Transaction, authorId: PeerId, authorName: String?) {
+    guard transaction.getPeer(authorId) == nil,
+          let authorName = authorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !authorName.isEmpty,
+          authorId.namespace == Namespaces.Peer.CloudUser else {
+        return
+    }
+    transaction.updatePeersInternal([
+        TelegramUser(
+            id: authorId,
+            accessHash: nil,
+            firstName: authorName,
+            lastName: nil,
+            username: nil,
+            phone: nil,
+            photo: [],
+            botInfo: nil,
+            restrictionInfo: nil,
+            flags: [],
+            emojiStatus: nil,
+            usernames: [],
+            storiesHidden: nil,
+            nameColor: nil,
+            backgroundEmojiId: nil,
+            profileColor: nil,
+            profileBackgroundEmojiId: nil,
+            subscriberCount: nil,
+            verificationIconFileId: nil
+        )
+    ], update: { previous, updated in
+        return previous ?? updated
+    })
+}
+
 public final class TelegramGlobalPostSearchState: Codable, Equatable {
     public let totalFreeSearches: Int32
     public let remainingFreeSearches: Int32
@@ -497,6 +561,10 @@ public extension TelegramEngine {
                     } else {
                         descriptor = FakeMessageMedia(kind: entry.kind)
                     }
+                    let effectiveAuthorId = outgoing ? account.peerId : miraFakeMessageAuthorId(authorPeerId: authorPeerId, authorName: authorName, fallbackPeerId: peerId)
+                    if !outgoing {
+                        miraEnsureFakeMessageAuthor(transaction: transaction, authorId: effectiveAuthorId, authorName: authorName)
+                    }
                     let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: miraGeneratedUrlEntities(entry.text), date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName, kind: entry.kind, media: descriptor)
                     let localMedia = miraFakeMessageMedia(record: record)
                     let displayText = miraFakeMessageDisplayText(record: record, text: entry.text, localMedia: localMedia)
@@ -504,7 +572,7 @@ public extension TelegramEngine {
                     if !outgoing {
                         flags.insert(.Incoming)
                     }
-                    let authorId: PeerId = outgoing ? account.peerId : (authorPeerId ?? peerId)
+                    let authorId: PeerId = effectiveAuthorId
                     var attributes: [MessageAttribute] = []
                     let textEntities = miraGeneratedUrlEntities(displayText)
                     if !textEntities.isEmpty {
@@ -617,12 +685,16 @@ public extension TelegramEngine {
                 storeMessages.reserveCapacity(messages.count)
                 for entry in messages {
                     let entities = miraGeneratedUrlEntities(entry.text)
+                    let effectiveAuthorId = outgoing ? account.peerId : miraFakeMessageAuthorId(authorPeerId: authorPeerId, authorName: authorName, fallbackPeerId: peerId)
+                    if !outgoing {
+                        miraEnsureFakeMessageAuthor(transaction: transaction, authorId: effectiveAuthorId, authorName: authorName)
+                    }
                     let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: entities, date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName)
                     var flags = StoreMessageFlags()
                     if !outgoing {
                         flags.insert(.Incoming)
                     }
-                    let authorId: PeerId = outgoing ? account.peerId : (authorPeerId ?? peerId)
+                    let authorId: PeerId = effectiveAuthorId
                     let message = StoreMessage(
                         peerId: peerId,
                         namespace: Namespaces.Message.Local,
@@ -748,6 +820,12 @@ public extension TelegramEngine {
                     return false
                 }
                 let forwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+                let effectiveAuthorId = prospective.outgoing
+                    ? account.peerId
+                    : miraFakeMessageAuthorId(authorPeerId: authorPeerId, authorName: authorName, fallbackPeerId: peerId)
+                if !prospective.outgoing {
+                    miraEnsureFakeMessageAuthor(transaction: transaction, authorId: effectiveAuthorId, authorName: authorName)
+                }
                 transaction.updateMessage(messageId, update: { _ in
                     return .update(StoreMessage(
                         id: currentMessage.id,
@@ -769,7 +847,7 @@ public extension TelegramEngine {
                         globalTags: currentMessage.globalTags,
                         localTags: currentMessage.localTags,
                         forwardInfo: forwardInfo,
-                        authorId: prospective.outgoing ? account.peerId : (authorPeerId ?? currentMessage.author?.id ?? peerId),
+                        authorId: effectiveAuthorId,
                         text: displayText,
                         attributes: {
                             var attributes = currentMessage.attributes.filter { !($0 is TextEntitiesMessageAttribute) }
@@ -822,12 +900,16 @@ public extension TelegramEngine {
                 storeMessages.reserveCapacity(messages.count)
                 for entry in messages {
                     let entities = miraGeneratedUrlEntities(entry.text)
+                    let effectiveAuthorId = entry.outgoing ? account.peerId : miraFakeMessageAuthorId(authorPeerId: authorPeerId, authorName: authorName, fallbackPeerId: peerId)
+                    if !entry.outgoing {
+                        miraEnsureFakeMessageAuthor(transaction: transaction, authorId: effectiveAuthorId, authorName: authorName)
+                    }
                     let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: entities, date: entry.date, outgoing: entry.outgoing, authorPeerId: entry.outgoing ? nil : authorPeerId?.toInt64(), authorName: entry.outgoing ? nil : authorName)
                     var flags = StoreMessageFlags()
                     if !entry.outgoing {
                         flags.insert(.Incoming)
                     }
-                    let authorId: PeerId = entry.outgoing ? account.peerId : (authorPeerId ?? peerId)
+                    let authorId: PeerId = effectiveAuthorId
                     storeMessages.append(StoreMessage(
                         peerId: peerId,
                         namespace: Namespaces.Message.Local,

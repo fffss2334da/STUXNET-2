@@ -608,6 +608,14 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         }
 
         let addMessages: (EnginePeer?, String?) -> Void = { author, fallbackName in
+            let enteredAuthorPeerId: PeerId? = {
+                guard let fallbackName = fallbackName,
+                      let value = Int64(fallbackName.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      value > 0 else {
+                    return nil
+                }
+                return PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(value))
+            }()
             if state.conversationMode {
                 let scriptedMessages: [(text: String, date: Int32, outgoing: Bool)] = texts.enumerated().compactMap { index, rawText in
                     var text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -637,7 +645,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                             text: entry.text,
                             outgoing: entry.outgoing,
                             date: entry.date,
-                            authorPeerId: author?.id,
+                            authorPeerId: author?.id ?? enteredAuthorPeerId,
                             authorName: author?.compactDisplayTitle ?? fallbackName
                         )
                     } else {
@@ -648,7 +656,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                             media: mediaDescriptor,
                             outgoing: entry.outgoing,
                             date: entry.date,
-                            authorPeerId: author?.id,
+                            authorPeerId: author?.id ?? enteredAuthorPeerId,
                             authorName: author?.compactDisplayTitle ?? fallbackName
                         )
                     }
@@ -676,13 +684,13 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
                     }
                 }
                 if state.kind == .text {
-                    let _ = (context.engine.messages.miraAddFakeMessages(peerId: peerId, messages: messageDates, outgoing: outgoing, authorPeerId: author?.id, authorName: author?.compactDisplayTitle ?? fallbackName)
+                    let _ = (context.engine.messages.miraAddFakeMessages(peerId: peerId, messages: messageDates, outgoing: outgoing, authorPeerId: author?.id ?? enteredAuthorPeerId, authorName: author?.compactDisplayTitle ?? fallbackName)
                     |> deliverOnMainQueue).start(completed: completeBatch)
                 } else {
                     let mediaMessages: [(text: String, date: Int32, kind: FakeMessageKind, media: FakeMessageMedia?)] = messageDates.map { entry in
                         return (text: entry.text, date: entry.date, kind: state.kind, media: mediaDescriptor)
                     }
-                    let _ = (context.engine.messages.miraAddFakeMediaMessages(peerId: peerId, messages: mediaMessages, outgoing: outgoing, authorPeerId: author?.id, authorName: author?.compactDisplayTitle ?? fallbackName)
+                    let _ = (context.engine.messages.miraAddFakeMediaMessages(peerId: peerId, messages: mediaMessages, outgoing: outgoing, authorPeerId: author?.id ?? enteredAuthorPeerId, authorName: author?.compactDisplayTitle ?? fallbackName)
                     |> deliverOnMainQueue).start(completed: completeBatch)
                 }
             }

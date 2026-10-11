@@ -680,10 +680,9 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
         entries.append(.add)
         entries.append(contentsOf: posts.map { .post($0) })
         if posts.isEmpty { entries.append(.footer(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Публикации, просмотры и реакции появятся здесь" : "Posts, views and reactions appear here")) }
-        let canEditProfile = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
-        let editTitle = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Профиль" : "Profile"
-        let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(channel?.title ?? "Channel"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(editTitle), style: .regular, enabled: canEditProfile, action: {
-            arguments.editProfile()
+        let canPublish = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
+        let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(channel?.title ?? "Channel"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: canPublish, action: {
+            arguments.add()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let list = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (state, (list, arguments))
