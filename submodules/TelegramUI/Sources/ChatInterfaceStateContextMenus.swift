@@ -1616,14 +1616,14 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 }
             }
             if context.sharedContext.immediateMiraSettings.fakeMessagesEnabled {
-                actions.append(.action(ContextMenuActionItem(text: "Manage Messages", icon: { theme in
+                actions.append(.action(ContextMenuActionItem(text: "Manage All Fake Messages", icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Customize"), color: theme.actionSheet.primaryTextColor)
                 }, action: { c, _ in
                     c?.dismiss(completion: {
                         guard let navigationController = controllerInteraction.navigationController() else {
                             return
                         }
-                        navigationController.pushViewController(miraFakeMessagesController(context: context, peerId: message.id.peerId))
+                        navigationController.pushViewController(miraFakeMessagesHubController(context: context))
                     })
                 })))
                 actions.append(.action(ContextMenuActionItem(text: "Add Message…", icon: { theme in

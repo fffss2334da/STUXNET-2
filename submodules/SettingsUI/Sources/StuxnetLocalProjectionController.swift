@@ -95,10 +95,21 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
         let arguments = arguments as! StuxnetLocalChannelEditorArguments
         switch self {
         case let .input(id, title, value, placeholder, isNumber):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            let localizedTitle: String = {
+                guard isRussian else { return title }
+                switch id {
+                case 0: return "Название"
+                case 1: return "Описание"
+                case 2: return "Имя пользователя"
+                case 10: return "Ссылка-приглашение"
+                default: return title
+                }
+            }()
             return ItemListSingleLineInputItem(
                 presentationData: presentationData,
                 systemStyle: .glass,
-                title: NSAttributedString(string: title),
+                title: NSAttributedString(string: localizedTitle),
                 text: value,
                 placeholder: placeholder,
                 type: isNumber ? .number : .regular(capitalization: true, autocorrection: false),
@@ -216,9 +227,10 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
 
     let signal = combineLatest(context.sharedContext.presentationData, store.changes, revision.get())
     |> map { presentationData, _, _ -> (ItemListControllerState, (ItemListNodeState, StuxnetLocalChannelEditorArguments)) in
+        let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text(isNew ? "Channel Settings" : "Edit Channel"),
+            title: .text(isNew ? "New Channel Profile" : "Channel Profile"),
             leftNavigationButton: nil,
             rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .regular, enabled: !store.isReadOnly && !arguments.channel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
                 guard !arguments.channel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -233,23 +245,16 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
             .input(0, "Name", channel.title, "Channel name", false),
             .input(1, "Description", channel.about, "About this channel", false),
             .input(2, "Username", channel.username ?? "", "channel_username", false),
-            .input(3, "Owner / admin tag", channel.adminTag ?? "", "Owner", false),
-            .input(4, "Role label", channel.roleLabel ?? "", "Owner / Administrator", false),
-            .input(5, "Owner name", channel.ownerName ?? "", "Owner display name", false),
-            .input(6, "Owner username", channel.ownerUsername ?? "", "@owner", false),
-            .input(7, "Subscribers", String(channel.subscribers), "0", true),
-            .input(8, "Channel Stars", String(channel.starsBalance), "0", true),
             .avatar(channel.avatarPath),
-            .input(9, "Avatar file path", channel.avatarPath ?? "", "Optional path (advanced)", false),
             .input(10, "Invite link", channel.inviteLink ?? "", "https://t.me/+...", false),
-            .input(11, "Attached Telegram channel IDs", (channel.attachedPeerIds ?? channel.attachedPeerId.map { [$0] } ?? []).map { String($0) }.joined(separator: ", "), "Optional numeric IDs, separated by commas", false),
-            .role(channel.role == .owner ? "Owner" : (channel.role == .administrator ? "Administrator" : "Member")),
             .visibility(channel.visibility == .publicChannel ? "Public" : "Private"),
             .posts(channel.posts.count),
-            .permissions(channel.role == .member
-                ? "Member access · posting is unavailable"
-                : "\(channel.role == .owner ? "Owner" : "Administrator") access · posting is available"),
-            .stats("Stats · \(channel.subscribers) subscribers · \(channel.posts.count) posts · \(stuxnetSaturatingSum(channel.posts.map(\.views))) views · \(stuxnetSaturatingSum(channel.posts.map { $0.comments ?? 0 })) comments · \(stuxnetSaturatingSum(channel.posts.map { stuxnetSaturatingSum([$0.stars, $0.starReactions ?? 0]) })) Stars")
+            .permissions(isRussian
+                ? "Режим владельца · публикации и предпросмотр профиля доступны"
+                : "Owner mode · posting and profile preview are available"),
+            .stats(isRussian
+                ? "Подписчики \(channel.subscribers) · \(channel.posts.count) публикаций · \(stuxnetSaturatingSum(channel.posts.map(\.views))) просмотров · \(stuxnetSaturatingSum(channel.posts.map { $0.comments ?? 0 })) комментариев"
+                : "Subscribers \(channel.subscribers) · \(channel.posts.count) posts · \(stuxnetSaturatingSum(channel.posts.map(\.views))) views · \(stuxnetSaturatingSum(channel.posts.map { $0.comments ?? 0 })) comments")
         ]
         if !isNew {
             entries.append(.delete)
@@ -530,6 +535,7 @@ private func stuxnetLocalChannelPostEditorController(context: AccountContext, ch
 }
 
 private enum StuxnetLocalChannelPostsEntry: ItemListNodeEntry {
+    case profile(MiraFakeChannel)
     case compose(String, Bool)
     case add
     case post(MiraFakeChannel.Post)
@@ -538,6 +544,7 @@ private enum StuxnetLocalChannelPostsEntry: ItemListNodeEntry {
     var section: ItemListSectionId { return 0 }
     var stableId: Int {
         switch self {
+        case .profile: return -1
         case .compose: return 0
         case .add: return 1
         case let .post(post): return stuxnetDeterministicStableId(post.id) + 1
@@ -549,6 +556,14 @@ private enum StuxnetLocalChannelPostsEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! StuxnetLocalChannelPostsArguments
         switch self {
+        case let .profile(channel):
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            let owner = channel.ownerName ?? (isRussian ? "Владелец" : "Owner")
+            let handle = channel.username.map { "@\($0)" } ?? (isRussian ? "без username" : "no username")
+            let summary = [channel.about.trimmingCharacters(in: .whitespacesAndNewlines), handle, owner]
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            return ItemListTextItem(presentationData: presentationData, text: .plain("\(channel.title)\n\(summary)"), sectionId: self.section)
         case let .compose(text, enabled):
             return ItemListMultilineInputItem(
                 presentationData: presentationData,
@@ -605,13 +620,15 @@ private enum StuxnetLocalChannelPostsEntry: ItemListNodeEntry {
 private final class StuxnetLocalChannelPostsArguments {
     let add: () -> Void
     let edit: (MiraFakeChannel.Post) -> Void
+    let editProfile: () -> Void
     var publish: () -> Void
     let updated: () -> Void
     var composeText: String
 
-    init(add: @escaping () -> Void, edit: @escaping (MiraFakeChannel.Post) -> Void, publish: @escaping () -> Void, updated: @escaping () -> Void) {
+    init(add: @escaping () -> Void, edit: @escaping (MiraFakeChannel.Post) -> Void, editProfile: @escaping () -> Void, publish: @escaping () -> Void, updated: @escaping () -> Void) {
         self.add = add
         self.edit = edit
+        self.editProfile = editProfile
         self.publish = publish
         self.updated = updated
         self.composeText = ""
@@ -634,6 +651,9 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
         pushControllerImpl?(stuxnetLocalChannelPostEditorController(context: context, channelId: channelId, post: nil))
     }, edit: { post in
         pushControllerImpl?(stuxnetLocalChannelPostEditorController(context: context, channelId: channelId, post: post))
+    }, editProfile: {
+        guard let channel = store.channel(id: channelId), channel.role == .owner || channel.role == .administrator else { return }
+        pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
     }, publish: {}, updated: update)
     arguments.publish = { [weak arguments] in
         guard let arguments else {
@@ -652,11 +672,19 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
         let channel = channels.first(where: { $0.id == channelId })
         let posts = channel?.posts ?? []
         let canPublish = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
-        var entries: [StuxnetLocalChannelPostsEntry] = [.compose(arguments.composeText, canPublish), .add]
+        var entries: [StuxnetLocalChannelPostsEntry] = []
+        if let channel {
+            entries.append(.profile(channel))
+        }
+        entries.append(.compose(arguments.composeText, canPublish))
+        entries.append(.add)
         entries.append(contentsOf: posts.map { .post($0) })
-        if posts.isEmpty { entries.append(.footer("Posts, views, Stars and reactions")) }
-        let roleText = channel?.role == .owner ? "Owner" : (channel?.role == .administrator ? "Administrator" : "Member")
-        let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("\(roleText) · Posts"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
+        if posts.isEmpty { entries.append(.footer(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Публикации, просмотры и реакции появятся здесь" : "Posts, views and reactions appear here")) }
+        let canEditProfile = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
+        let editTitle = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Профиль" : "Profile"
+        let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(channel?.title ?? "Channel"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(editTitle), style: .regular, enabled: canEditProfile, action: {
+            arguments.editProfile()
+        }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let list = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (state, (list, arguments))
     }
@@ -696,12 +724,15 @@ private enum StuxnetFakeChannelsEntry: ItemListNodeEntry {
         let arguments = arguments as! StuxnetFakeChannelsArguments
         switch self {
         case .add:
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Add existing Telegram channel", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.attach)
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: isRussian ? "Добавить канал из Telegram" : "Add channel from Telegram", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.attach)
         case let .channel(channel):
-            let role = channel.roleLabel ?? (channel.role == .owner ? "Owner" : (channel.role == .administrator ? "Admin" : "Member"))
-            let owner = channel.ownerName.map { " · \($0)" } ?? ""
-            let tag = channel.adminTag.map { " · @\($0)" } ?? ""
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: channel.title, label: "\(role)\(tag)\(owner) · \(channel.subscribers)", sectionId: self.section, style: .blocks, action: {
+            let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+            let attachedCount = channel.attachedPeerIds?.count ?? (channel.attachedPeerId == nil ? 0 : 1)
+            let label = isRussian
+                ? "Владелец · \(channel.subscribers) подписчиков · \(attachedCount) каналов"
+                : "Owner · \(channel.subscribers) subscribers · \(attachedCount) channels"
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: channel.title, label: label, sectionId: self.section, style: .blocks, action: {
                 arguments.edit(channel)
             })
         case let .footer(text):
@@ -767,11 +798,11 @@ public func stuxnetFakeChannelsController(context: AccountContext) -> ViewContro
                 if let navigationController = selector?.navigationController as? NavigationController, navigationController.topViewController === selector {
                     _ = navigationController.popViewController(animated: false)
                 }
-                pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
+                pushControllerImpl?(stuxnetLocalChannelPostsController(context: context, channelId: channel.id))
             })
         })
     }, edit: { channel in
-        pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
+        pushControllerImpl?(stuxnetLocalChannelPostsController(context: context, channelId: channel.id))
     })
     let signal: Signal<(ItemListControllerState, (ItemListNodeState, StuxnetFakeChannelsArguments)), NoError> = combineLatest(context.sharedContext.presentationData, store.changes)
     |> map { presentationData, channels -> (ItemListControllerState, (ItemListNodeState, StuxnetFakeChannelsArguments)) in

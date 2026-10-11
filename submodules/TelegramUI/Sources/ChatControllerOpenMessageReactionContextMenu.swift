@@ -393,7 +393,11 @@ extension ChatControllerImpl {
     }
     
     func openMessageSendStarsScreen(message: EngineMessage) {
-        guard canSendReactionsToChat(self.presentationInterfaceState) else {
+        // Local Stars reactions are a projection feature and should remain
+        // available for fake/local messages even when Telegram's server-side
+        // reaction permissions are unavailable for the peer.
+        let usesLocalStars = self.context.sharedContext.immediateMiraSettings.fakeStarsEnabled
+        guard usesLocalStars || canSendReactionsToChat(self.presentationInterfaceState) else {
             return
         }
 
@@ -417,8 +421,6 @@ extension ChatControllerImpl {
                 guard let self, amount > 0 else {
                     return
                 }
-                let usesLocalStars = self.context.sharedContext.immediateMiraSettings.fakeStarsEnabled
-                
                 if !usesLocalStars, case let .known(reactionSettings) = reactionSettings, let starsAllowed = reactionSettings.starsAllowed, !starsAllowed {
                     if let peer = self.presentationInterfaceState.renderedPeer?.chatMainPeer {
                         self.present(textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: nil, text: self.presentationData.strings.Chat_ToastStarsReactionsDisabled(peer.debugDisplayTitle).string, actions: [

@@ -1123,6 +1123,135 @@ private func miraFakeMessageListDate(_ timestamp: Int32) -> String {
     return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
 }
 
+private enum MiraFakeMessagesHubEntry: ItemListNodeEntry {
+    case add
+    case chat(Int64, Int)
+    case empty(String)
+
+    var section: ItemListSectionId {
+        switch self {
+        case .add:
+            return 0
+        case .chat, .empty:
+            return 1
+        }
+    }
+
+    var stableId: Int {
+        switch self {
+        case .add:
+            return 0
+        case let .chat(peerId, _):
+            return Int(truncatingIfNeeded: peerId) ^ 0x2a2a0000
+        case .empty:
+            return Int.max
+        }
+    }
+
+    static func < (lhs: MiraFakeMessagesHubEntry, rhs: MiraFakeMessagesHubEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        let arguments = arguments as! MiraFakeMessagesHubArguments
+        let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        switch self {
+        case .add:
+            return ItemListActionItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: isRussian ? "Добавить сообщения в чат" : "Add messages to a chat",
+                kind: .generic,
+                alignment: .natural,
+                sectionId: self.section,
+                style: .blocks,
+                action: arguments.add
+            )
+        case let .chat(peerId, count):
+            let title = isRussian ? "Чат · \(peerId)" : "Chat · \(peerId)"
+            let noun = count == 1
+                ? (isRussian ? "сообщение" : "message")
+                : (isRussian ? "сообщений" : "messages")
+            let label = isRussian
+                ? "\(count) \(noun) · открыть редактор"
+                : "\(count) \(noun) · open editor"
+            return ItemListDisclosureItem(
+                presentationData: presentationData,
+                systemStyle: .glass,
+                title: title,
+                label: label,
+                sectionId: self.section,
+                style: .blocks,
+                action: { arguments.open(peerId) }
+            )
+        case let .empty(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+        }
+    }
+}
+
+private final class MiraFakeMessagesHubArguments {
+    let add: () -> Void
+    let open: (Int64) -> Void
+
+    init(add: @escaping () -> Void, open: @escaping (Int64) -> Void) {
+        self.add = add
+        self.open = open
+    }
+}
+
+/// Global fake-message manager. The old editor was only reachable from the
+/// currently open chat, which made long conversations and multiple target
+/// chats difficult to manage. This screen groups local records by peer and
+/// routes each row back into the existing Telegram chat/editor flow.
+public func miraFakeMessagesHubController(context: AccountContext) -> ViewController {
+    var pushControllerImpl: ((ViewController) -> Void)?
+    let arguments = MiraFakeMessagesHubArguments(add: {
+        pushControllerImpl?(miraFakeConversationPickerController(context: context, push: { controller in
+            pushControllerImpl?(controller)
+        }))
+    }, open: { packedPeerId in
+        guard let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: packedPeerId) else {
+            return
+        }
+        pushControllerImpl?(miraFakeMessagesController(context: context, peerId: peerId))
+    })
+
+    let signal = combineLatest(context.sharedContext.presentationData, context.account.miraMessageHistoryStore.fakeMessagesChanges)
+    |> map { presentationData, records -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let isRussian = presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru")
+        var counts: [Int64: Int] = [:]
+        for record in records {
+            counts[record.messagePeerId, default: 0] += 1
+        }
+        var entries: [MiraFakeMessagesHubEntry] = [.add]
+        if counts.isEmpty {
+            entries.append(.empty(isRussian ? "Пока нет fake-сообщений. Выберите чат и добавьте первую запись." : "No fake messages yet. Choose a chat and add the first record."))
+        } else {
+            entries.append(contentsOf: counts.keys.sorted().compactMap { peerId in
+                guard MiraMessageHistoryStore.peerId(fromPackedValue: peerId) != nil else { return nil }
+                return .chat(peerId, counts[peerId] ?? 0)
+            })
+        }
+        let state = ItemListControllerState(
+            presentationData: ItemListPresentationData(presentationData),
+            title: .text(isRussian ? "Fake-сообщения" : "Fake messages"),
+            leftNavigationButton: nil,
+            rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: true, action: {
+                arguments.add()
+            }),
+            backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back),
+            animateChanges: true
+        )
+        return (state, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), arguments))
+    }
+    let controller = ItemListController(context: context, state: signal)
+    pushControllerImpl = { [weak controller] next in
+        (controller?.navigationController as? NavigationController)?.pushViewController(next)
+    }
+    return controller
+}
+
 public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) -> ViewController {
     var pushControllerImpl: ((ViewController) -> Void)?
     var presentControllerImpl: ((ViewController) -> Void)?

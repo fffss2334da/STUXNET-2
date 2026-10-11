@@ -75,6 +75,10 @@ private func stuxnetVoiceChangerPresetName(_ id: Int32) -> String {
     }
 }
 
+private func stuxnetLocalizedText(_ presentationData: PresentationData, ru: String, en: String) -> String {
+    return presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? ru : en
+}
+
 private final class StuxnetControllerArguments {
     let context: AccountContext
     let updateSettings: (@escaping (inout MiraSettings) -> Void) -> Void
@@ -326,6 +330,8 @@ private enum StuxnetHubSection: Int32 {
 }
 
 private enum StuxnetHubEntry: ItemListNodeEntry {
+    case header(Int, String)
+    case intro(String)
     case ghost(Bool)
     case privacy
     case spy
@@ -339,7 +345,7 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .ghost, .privacy, .spy, .fake, .localChannels, .localProfile, .voiceChanger, .appearance:
+        case .header, .intro, .ghost, .privacy, .spy, .fake, .localChannels, .localProfile, .voiceChanger, .appearance:
             return StuxnetHubSection.main.rawValue
         case .resetAll, .versionInfo:
             return StuxnetHubSection.actions.rawValue
@@ -348,6 +354,8 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
 
     var stableId: Int {
         switch self {
+        case let .header(id, _): return -10 + id
+        case .intro: return -1
         case .ghost:
             return 0
         case .privacy:
@@ -378,36 +386,40 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! StuxnetControllerArguments
         switch self {
+        case let .header(_, text):
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+        case let .intro(text):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .ghost(isActive):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.antiSpam, title: "Ghost Mode", label: isActive ? "On" : "Off", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.antiSpam, title: stuxnetLocalizedText(presentationData, ru: "Режим призрака", en: "Ghost Mode"), label: isActive ? stuxnetLocalizedText(presentationData, ru: "Вкл.", en: "On") : stuxnetLocalizedText(presentationData, ru: "Выкл.", en: "Off"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetGhostSettingsController(context: arguments.context))
             })
         case .privacy:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.security, title: "Privacy & Presence", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.security, title: stuxnetLocalizedText(presentationData, ru: "Приватность и присутствие", en: "Privacy & Presence"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetPrivacySettingsController(context: arguments.context))
             })
         case .spy:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.recentActions, title: "Spy & Message History", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.recentActions, title: stuxnetLocalizedText(presentationData, ru: "История сообщений", en: "Spy & Message History"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetSpySettingsController(context: arguments.context))
             })
         case .fake:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.premium, title: "Telegram Tools", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.premium, title: stuxnetLocalizedText(presentationData, ru: "Режимы Stuxnet", en: "Stuxnet Modes"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetFakeSettingsController(context: arguments.context))
             })
         case .localChannels:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Channels", label: "Access", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: stuxnetLocalizedText(presentationData, ru: "Каналы и публикации", en: "Channels & Posts"), label: stuxnetLocalizedText(presentationData, ru: "Владелец", en: "Owner view"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetFakeChannelsController(context: arguments.context))
             })
         case .localProfile:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Profile", label: "Username / phone", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: stuxnetLocalizedText(presentationData, ru: "Профиль", en: "Profile"), label: stuxnetLocalizedText(presentationData, ru: "Предпросмотр", en: "Preview"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetLocalProfilePreviewController(context: arguments.context))
             })
         case let .voiceChanger(isEnabled):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.voices, title: "Voice Changer", label: isEnabled ? "On" : "Off", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.voices, title: stuxnetLocalizedText(presentationData, ru: "Изменение голоса", en: "Voice Changer"), label: isEnabled ? stuxnetLocalizedText(presentationData, ru: "Вкл.", en: "On") : stuxnetLocalizedText(presentationData, ru: "Выкл.", en: "Off"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetVoiceChangerSettingsController(context: arguments.context))
             })
         case .appearance:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.appearance, title: "Appearance & Misc", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.appearance, title: stuxnetLocalizedText(presentationData, ru: "Внешний вид", en: "Appearance & Misc"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetAppearanceSettingsController(context: arguments.context))
             })
         case .resetAll:
@@ -436,12 +448,17 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
 
 private func stuxnetHubEntries(settings: MiraSettings, accountPeerId: PeerId) -> [StuxnetHubEntry] {
     var entries: [StuxnetHubEntry] = []
+    entries.append(.header(0, "STUXNET CONTROL CENTER"))
+    entries.append(.intro("Локальные проекции Telegram\nНастройки ниже меняют отображение во всех чатах аккаунта и не отправляют данные в Telegram."))
+    entries.append(.header(1, "ПРИВАТНОСТЬ И ИСТОРИЯ"))
     entries.append(.ghost(settings.ghostSettings(forAccountPeerId: accountPeerId).isGhostActive))
     entries.append(.privacy)
     entries.append(.spy)
+    entries.append(.header(2, "ПРОФИЛИ И КОНТЕНТ"))
     entries.append(.fake)
     entries.append(.localChannels)
     entries.append(.localProfile)
+    entries.append(.header(3, "МЕДИА И ВИД"))
     entries.append(.voiceChanger(settings.voiceChangerEnabled))
     entries.append(.appearance)
     entries.append(.resetAll)
@@ -1507,17 +1524,20 @@ private enum StuxnetFakeEntry: ItemListNodeEntry {
     case fakePremiumSince(Bool)
 
     case starsHeader(String)
+    case starsSummary(String)
     case fakeStarsEnabled(Bool)
     case fakeStarsBalance(String)
     case fakeStarsHistory
     case fakeStarsStats
 
     case giftsHeader(String)
+    case giftsSummary(String)
     case fakeGiftsEnabled(Bool)
     case fakeGiftCount(String)
     case manageFakeGifts
 
     case ratingHeader(String)
+    case ratingSummary(String)
     case fakeRatingEnabled(Bool)
     case fakeRatingValue(String)
 
@@ -1525,11 +1545,11 @@ private enum StuxnetFakeEntry: ItemListNodeEntry {
         switch self {
         case .localPremium, .fakePremiumSince:
             return StuxnetFakeSection.premium.rawValue
-        case .starsHeader, .fakeStarsEnabled, .fakeStarsBalance, .fakeStarsHistory, .fakeStarsStats:
+        case .starsHeader, .starsSummary, .fakeStarsEnabled, .fakeStarsBalance, .fakeStarsHistory, .fakeStarsStats:
             return StuxnetFakeSection.stars.rawValue
-        case .giftsHeader, .fakeGiftsEnabled, .fakeGiftCount, .manageFakeGifts:
+        case .giftsHeader, .giftsSummary, .fakeGiftsEnabled, .fakeGiftCount, .manageFakeGifts:
             return StuxnetFakeSection.gifts.rawValue
-        case .ratingHeader, .fakeRatingEnabled, .fakeRatingValue:
+        case .ratingHeader, .ratingSummary, .fakeRatingEnabled, .fakeRatingValue:
             return StuxnetFakeSection.rating.rawValue
         }
     }
@@ -1542,28 +1562,34 @@ private enum StuxnetFakeEntry: ItemListNodeEntry {
             return 1
         case .starsHeader:
             return 2
-        case .fakeStarsEnabled:
+        case .starsSummary:
             return 3
-        case .fakeStarsBalance:
+        case .fakeStarsEnabled:
             return 4
-        case .fakeStarsHistory:
+        case .fakeStarsBalance:
             return 5
-        case .fakeStarsStats:
+        case .fakeStarsHistory:
             return 6
-        case .giftsHeader:
+        case .fakeStarsStats:
             return 7
-        case .fakeGiftsEnabled:
+        case .giftsHeader:
             return 8
-        case .fakeGiftCount:
+        case .giftsSummary:
             return 9
-        case .manageFakeGifts:
+        case .fakeGiftsEnabled:
             return 10
-        case .ratingHeader:
+        case .fakeGiftCount:
             return 11
-        case .fakeRatingEnabled:
+        case .manageFakeGifts:
             return 12
-        case .fakeRatingValue:
+        case .ratingHeader:
             return 13
+        case .ratingSummary:
+            return 14
+        case .fakeRatingEnabled:
+            return 15
+        case .fakeRatingValue:
+            return 16
         }
     }
 
@@ -1587,28 +1613,38 @@ private enum StuxnetFakeEntry: ItemListNodeEntry {
                 }
             })
         case let .starsHeader(text):
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: stuxnetLocalizedText(presentationData, ru: "ЗВЁЗДЫ", en: text), sectionId: self.section)
+        case let .starsSummary(text), let .giftsSummary(text), let .ratingSummary(text):
+            let localized: String
+            if case .starsSummary = self {
+                localized = stuxnetLocalizedText(presentationData, ru: "Локальный баланс: платные сообщения, реакции и публикации списывают звёзды. Реальные платежи не отправляются.", en: text)
+            } else if case .giftsSummary = self {
+                localized = stuxnetLocalizedText(presentationData, ru: "Добавляйте подарок с предпросмотром. NFT-передача использует выбранного получателя и комиссию 25 звёзд.", en: text)
+            } else {
+                localized = stuxnetLocalizedText(presentationData, ru: "Уровень профиля считается по порогам Telegram при отображении профиля.", en: text)
+            }
+            return ItemListTextItem(presentationData: presentationData, text: .plain(localized), sectionId: self.section)
         case let .fakeStarsEnabled(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Stars Balance", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: stuxnetLocalizedText(presentationData, ru: "Локальные звёзды", en: "Stars Balance"), value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.fakeStarsEnabled = value
                 }
             })
         case let .fakeStarsBalance(label):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Stars Balance", label: label, sectionId: self.section, style: .blocks, action: {
-                arguments.pushController(stuxnetManualIntegerController(context: arguments.context, title: "Stars Balance", currentValue: { settings in
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: stuxnetLocalizedText(presentationData, ru: "Баланс звёзд", en: "Stars Balance"), label: label, sectionId: self.section, style: .blocks, action: {
+                arguments.pushController(stuxnetManualIntegerController(context: arguments.context, title: stuxnetLocalizedText(presentationData, ru: "Баланс звёзд", en: "Stars Balance"), currentValue: { settings in
                     settings.fakeStarsBalance
                 }, range: 0 ... Int64.max, updateValue: { settings, value in
                     settings.fakeStarsBalance = value
                     _ = arguments.context.account.miraFakeStarsLedger.setBalance(value, note: "Stars balance adjustment")
-                }, footer: "Set the balance used by Stars and gift actions."))
+                }, footer: stuxnetLocalizedText(presentationData, ru: "Баланс используется для локальных сообщений и подарков.", en: "Set the balance used by Stars and gift actions.")))
             })
         case .fakeStarsHistory:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Stars transaction history", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: stuxnetLocalizedText(presentationData, ru: "История операций со звёздами", en: "Stars transaction history"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetFakeStarsLedgerController(context: arguments.context))
             })
         case .fakeStarsStats:
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "Stars statistics", label: "", sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: stuxnetLocalizedText(presentationData, ru: "Статистика звёзд", en: "Stars statistics"), label: "", sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetFakeStarsStatsController(context: arguments.context))
             })
         case let .giftsHeader(text):
@@ -1657,17 +1693,20 @@ private func stuxnetFakeEntries(settings: MiraSettings, ledgerBalance: Int64? = 
     entries.append(.fakePremiumSince(settings.fakePremiumSince))
 
     entries.append(.starsHeader("Stars".uppercased()))
+    entries.append(.starsSummary("Fake Stars are local to this account. Paid messages, reactions and channel posts debit this balance; real Telegram payments are never sent."))
     entries.append(.fakeStarsEnabled(settings.fakeStarsEnabled))
     entries.append(.fakeStarsBalance(stuxnetFormattedNumber(ledgerBalance ?? settings.fakeStarsBalance)))
     entries.append(.fakeStarsHistory)
     entries.append(.fakeStarsStats)
 
     entries.append(.giftsHeader("Gifts".uppercased()))
+    entries.append(.giftsSummary("Add gifts with a visible preview. NFT transfers use the selected recipient and a fixed 25-Star local fee."))
     entries.append(.fakeGiftsEnabled(settings.fakeGiftsEnabled))
     entries.append(.fakeGiftCount(stuxnetFormattedGiftInventory(settings.fakeGiftCount)))
     entries.append(.manageFakeGifts)
 
     entries.append(.ratingHeader("Rating".uppercased()))
+    entries.append(.ratingSummary("The profile level is calculated from Telegram thresholds when the profile is rendered."))
     entries.append(.fakeRatingEnabled(settings.fakeRatingEnabled))
     let ratingValue = settings.fakeRatingValue
     // The actual level depends on Telegram's cached threshold pair and is
@@ -1782,7 +1821,7 @@ private func stuxnetFakeStarsLedgerController(context: AccountContext) -> ViewCo
             for (index, entry) in snapshot.entries.reversed().enumerated() {
                 if entry.kind == .fakeStarsMessage,
                    let relatedId = entry.relatedId,
-                   (deletedIds.contains(relatedId) || relatedId.contains(":edit:")) {
+                   (deletedIds.contains(relatedId) || relatedId.contains(":edit:") || relatedId.hasSuffix(":delete")) {
                     continue
                 }
                 let sign = entry.delta >= 0 ? "+" : ""
