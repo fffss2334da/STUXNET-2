@@ -660,7 +660,11 @@ extension MiraFakeGiftsStore {
                         return .unique(gift)
                     }
                     |> `catch` { _ -> Signal<StarGift?, NoError> in
-                        return .single(nil)
+                        // A local fake gift must remain inspectable while the
+                        // catalog is unavailable. Keep the stored slug and
+                        // number visible through the same local-only
+                        // projection used by uniqueById entries.
+                        return .single(self.offlineUniqueGift(for: entry, account: account))
                     }
                 } else {
                     giftSignal = .single(nil)
