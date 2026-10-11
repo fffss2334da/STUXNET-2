@@ -4963,10 +4963,14 @@ func replayFinalState(
                         case let .userStatusOffline(userStatusOfflineData):
                             let timestamp = userStatusOfflineData.wasOnline
                             MiraCoreGate.shared.updateServerLastSeen(forAccountPeerId: accountPeerId, timestamp: timestamp)
-                            transaction.updatePeerPresenceInternal(peerId: accountPeerId, update: { previous in
-                                let currentStatus = (previous as? TelegramUserPresence)?.status ?? .none
-                                return TelegramUserPresence(status: currentStatus, lastActivity: timestamp)
-                            })
+                            transaction.updatePeerPresencesInternal(
+                                presences: [accountPeerId: TelegramUserPresence(status: .present(until: timestamp), lastActivity: timestamp)],
+                                merge: { previous, updated in
+                                    let currentStatus = (previous as? TelegramUserPresence)?.status ?? .present(until: timestamp)
+                                    let previousActivity = (previous as? TelegramUserPresence)?.lastActivity ?? 0
+                                    return TelegramUserPresence(status: currentStatus, lastActivity: max(previousActivity, timestamp))
+                                }
+                            )
                             if explicit {
                                 delayNotificatonsUntil = timestamp
                             }
