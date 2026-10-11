@@ -1186,7 +1186,7 @@ private enum MiraFakeMessagesHubEntry: ItemListNodeEntry {
                 action: arguments.add
             )
         case let .chat(peerId, count):
-            let title = isRussian ? "Чат · \(peerId)" : "Chat · \(peerId)"
+            let title = miraFakeChatLabel(peerId, isRussian: isRussian)
             let noun = count == 1
                 ? (isRussian ? "сообщение" : "message")
                 : (isRussian ? "сообщений" : "messages")
@@ -1216,6 +1216,25 @@ private final class MiraFakeMessagesHubArguments {
         self.add = add
         self.open = open
     }
+}
+
+private func miraFakeChatLabel(_ packedPeerId: Int64, isRussian: Bool) -> String {
+    guard let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: packedPeerId) else {
+        return isRussian ? "Неизвестный чат" : "Unknown chat"
+    }
+    let numericId = peerId.id._internalGetInt64Value()
+    let kind: String
+    switch peerId.namespace {
+    case Namespaces.Peer.CloudUser:
+        kind = isRussian ? "Пользователь" : "User"
+    case Namespaces.Peer.CloudGroup:
+        kind = isRussian ? "Группа" : "Group"
+    case Namespaces.Peer.CloudChannel:
+        kind = isRussian ? "Канал" : "Channel"
+    default:
+        kind = isRussian ? "Чат" : "Chat"
+    }
+    return "(kind) · ID (numericId)"
 }
 
 /// Global fake-message manager. The old editor was only reachable from the

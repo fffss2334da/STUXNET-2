@@ -1508,7 +1508,7 @@ private func stuxnetSpyEntries(settings: MiraSettings) -> [StuxnetSpyEntry] {
 
     entries.append(.localMessageEditEnabled(settings.localMessageEditEnabled))
     entries.append(.fakeMessagesEnabled(settings.fakeMessagesEnabled))
-    entries.append(.fakeMessagesInfo("Use a chat's menu to add and edit messages in the conversation."))
+    entries.append(.fakeMessagesInfo("Open Stuxnet → Fake chats to choose any known chat, set the sender, and manage unread state."))
     return entries
 }
 
