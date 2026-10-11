@@ -34,7 +34,7 @@ private func miraGeneratedUrlEntities(_ text: String) -> [MessageTextEntity] {
     // `t.me/example` in a few system versions. Telegram accepts those links
     // in messages, so add the same URL entity for a token that starts at a
     // boundary and trim punctuation copied from prose.
-    for prefix in ["t.me/", "telegram.me/", "fragment.com/"] {
+    for prefix in ["t.me/", "telegram.me/", "fragment.com/", "tg://"] {
         var searchRange = range
         while searchRange.location < range.length {
             let match = nsText.range(of: prefix, options: [.caseInsensitive], range: searchRange)

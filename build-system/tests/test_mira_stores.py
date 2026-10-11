@@ -157,6 +157,8 @@ def static_regressions() -> None:
         raise RuntimeError("chat history must filter only locally-owned fake rows")
     if "fakeMessage.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages" not in chat_history:
         raise RuntimeError("Stars projections must have an independent visibility switch")
+    if "fakeIncomingCount" not in chat_list or "fakeUnreadCount" not in chat_list or "_asReadCounters()" not in chat_list:
+        raise RuntimeError("chat list unread badges must reconcile local fake read markers")
     if "fakeMessagesByMessageId()" not in chat_history or "localChatMessageIds()" not in chat_history:
         raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
     if "private var fakeMessageByMessageId: [MessageId: FakeMessageRecord]" not in (ROOT / "submodules/TelegramCore/Sources/State/MiraMessageHistoryStore.swift").read_text(encoding="utf-8"):
@@ -174,8 +176,8 @@ def static_regressions() -> None:
         raise RuntimeError("fake channel actions must be gated by fake messages setting")
     if "miraGeneratedUrlEntities" not in engine or "TextEntitiesMessageAttribute(entities: textEntities)" not in engine:
         raise RuntimeError("local messages must receive Telegram URL entities so chat links remain tappable")
-    if 'for prefix in ["t.me/", "telegram.me/", "fragment.com/"]' not in engine:
-        raise RuntimeError("bare Telegram chat links must be detected even when NSDataDetector misses them")
+    if 'for prefix in ["t.me/", "telegram.me/", "fragment.com/", "tg://"]' not in engine:
+        raise RuntimeError("bare Telegram and tg:// links must be detected even when NSDataDetector misses them")
     if "MiraFakeConversationDestination" not in fake_message_ui or 'path.first == "c"' not in fake_message_ui:
         raise RuntimeError("new local conversations must accept public and known private Telegram chat links")
     if "case .user = peer" in fake_message_ui:
