@@ -1670,7 +1670,10 @@ private func stuxnetFakeEntries(settings: MiraSettings, ledgerBalance: Int64? = 
     entries.append(.ratingHeader("Rating".uppercased()))
     entries.append(.fakeRatingEnabled(settings.fakeRatingEnabled))
     let ratingValue = settings.fakeRatingValue
-    entries.append(.fakeRatingValue("\(stuxnetFormattedNumber(ratingValue)) · Level \(settings.fakeRatingLevel)"))
+    // The actual level depends on Telegram's cached threshold pair and is
+    // calculated when the profile is rendered. Do not expose the legacy
+    // `fakeRatingLevel` field here: older builds left it at zero forever.
+    entries.append(.fakeRatingValue(stuxnetFormattedNumber(ratingValue)))
     return entries
 }
 

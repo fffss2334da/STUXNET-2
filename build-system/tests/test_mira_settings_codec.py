@@ -19,6 +19,7 @@ def source():
     spec.loader.exec_module(module)
     extract = module.declaration
     settings = read("submodules/TelegramUIPreferences/Sources/MiraSettings.swift")
+    cached_user_data = read("submodules/TelegramCore/Sources/SyncCore/SyncCore_CachedUserData.swift")
     postbox = "submodules/Postbox/Sources/"
     # Hashes identify object types in the binary headers. These tests decode
     # through Codable, so the global PostboxCoding type registry is not used.
@@ -54,6 +55,7 @@ public enum EnginePeer { public typealias Id = PeerId }
         extract(settings, "public enum MiraLocalPeerRole"),
         extract(settings, "public struct MiraLocalPeerOverride"),
         extract(settings, "public struct MiraSettings"),
+        extract(cached_user_data, "public final class TelegramStarRating"),
     ])
     parts = [re.sub(r"^import [^\n]+$", "", part, flags=re.MULTILINE) for part in parts]
     result = "import Foundation\n" + "\n".join(parts)
@@ -67,6 +69,17 @@ func roundTrip(_ value: MiraSettings) {
     check(decoded == value, "settings round trip")
 }
 roundTrip(.defaultSettings)
+let serverRating = TelegramStarRating(level: 2, currentLevelStars: 1000, stars: 2000, nextLevelStars: 3000)
+let inLevelRating = serverRating.withUpdatedTotalStars(2500)
+check(inLevelRating.level == 2 && inLevelRating.currentLevelStars == 1000 && inLevelRating.nextLevelStars == 3000, "rating remains in its server-supplied range")
+let nextLevelRating = serverRating.withUpdatedTotalStars(3000)
+check(nextLevelRating.level == 3 && nextLevelRating.currentLevelStars == 3000 && nextLevelRating.nextLevelStars == 5000, "rating advances at the next threshold")
+let higherRating = serverRating.withUpdatedTotalStars(3500)
+check(higherRating.level == 3 && higherRating.currentLevelStars == 3000 && higherRating.nextLevelStars == 5000, "rating total beyond the cached range is rebased")
+let lowerRating = serverRating.withUpdatedTotalStars(500)
+check(lowerRating.level == 1 && lowerRating.currentLevelStars == 0 && lowerRating.nextLevelStars == 1000, "rating below the cached range is rebased")
+let localBaselineRating = TelegramStarRating(level: 0, currentLevelStars: 0, stars: 0, nextLevelStars: 1000).withUpdatedTotalStars(3500)
+check(localBaselineRating.level == 3 && localBaselineRating.currentLevelStars == 3000 && localBaselineRating.nextLevelStars == 4000, "local rating works without server rating data")
 var configured = MiraSettings.defaultSettings
 var ghost = MiraGhostSettings.defaultSettings
 ghost.setGhostModeEnabled(true)

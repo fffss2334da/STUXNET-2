@@ -1019,6 +1019,45 @@ public final class TelegramStarRating: Codable, Equatable {
         self.stars = stars
         self.nextLevelStars = nextLevelStars
     }
+
+    /// Keep a locally projected total inside the threshold range used by the
+    /// profile rating bar. Telegram provides the active threshold pair; extend
+    /// that interval in either direction when a local value crosses it.
+    public func withUpdatedTotalStars(_ total: Int64) -> TelegramStarRating {
+        let stars = max(0, total)
+        var level = self.level
+        var current = max(0, self.currentLevelStars)
+        var next = self.nextLevelStars.map { max(0, $0) }
+
+        let step: Int64
+        if let next, next > current {
+            step = next - current
+        } else {
+            step = max(1, current)
+        }
+
+        while level > 0 && stars < current {
+            let previous = max(0, current - step)
+            next = current
+            current = previous
+            level -= 1
+            if current == 0 {
+                break
+            }
+        }
+
+        while let threshold = next, stars >= threshold {
+            level += 1
+            current = threshold
+            let newThreshold = threshold > Int64.max - step ? Int64.max : threshold + step
+            next = newThreshold == Int64.max ? nil : newThreshold
+            if newThreshold == Int64.max {
+                break
+            }
+        }
+
+        return TelegramStarRating(level: level, currentLevelStars: current, stars: stars, nextLevelStars: next)
+    }
     
     public static func ==(lhs: TelegramStarRating, rhs: TelegramStarRating) -> Bool {
         if lhs.level != rhs.level {

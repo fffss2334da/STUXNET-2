@@ -142,11 +142,18 @@ func chatHistoryEntriesForView(
     }
     
     var count = 0
-    let fakeMessagesByMessageId = !localProjectionSettings.fakeMessages || !localProjectionSettings.fakeStars ? context.account.miraMessageHistoryStore.fakeMessagesByMessageId() : [:]
-    let fakeGiftMessageIds = !localProjectionSettings.fakeGifts ? context.account.miraFakeGiftsStore.localChatMessageIds() : []
+    // Load ownership independently from the switches. When a projection is
+    // disabled its rows still need to be recognized and filtered; loading an
+    // empty map/list made local rows leak back into an ordinary chat.
+    let fakeMessagesByMessageId = context.account.miraMessageHistoryStore.fakeMessagesByMessageId()
+    let fakeGiftMessageIds = context.account.miraFakeGiftsStore.localChatMessageIds()
     loop: for entry in view.entries {
         var message = entry.message
         var isRead = entry.isRead
+
+        if let fakeMessage = fakeMessagesByMessageId[message.id] {
+            isRead = fakeMessage.isRead
+        }
 
         // Local is a shared Postbox namespace: Telegram uses it for service
         // rows as well as our account-local projections. Hide only records
@@ -155,7 +162,8 @@ func chatHistoryEntriesForView(
         // behave immediately for an already-open chat.
         if message.id.namespace == Namespaces.Message.Local {
             if let fakeMessage = fakeMessagesByMessageId[message.id] {
-                if !localProjectionSettings.fakeMessages || (fakeMessage.kind == .stars && !localProjectionSettings.fakeStars) {
+                let isEnabled = fakeMessage.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages
+                if !isEnabled {
                     continue loop
                 }
             } else if fakeGiftMessageIds.contains(message.id) && !localProjectionSettings.fakeGifts {

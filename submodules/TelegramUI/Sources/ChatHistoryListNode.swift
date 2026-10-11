@@ -4683,7 +4683,15 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
     
     private func updateReadHistoryActions() {
         let canRead = self.canReadHistoryValue && self.isScrollAtBottomPosition
-        
+
+        if canRead, case let .peer(peerId) = self.chatLocation,
+           MiraCoreGate.shared.snapshot(forAccountPeerId: self.context.account.peerId).fakeMessagesEnabled {
+            let fakeStore = self.context.account.miraMessageHistoryStore
+            for record in fakeStore.fakeMessages(in: peerId) where !record.outgoing && !record.isRead {
+                _ = fakeStore.setFakeMessageRead(id: record.id, isRead: true)
+            }
+        }
+
         if canRead != (self.interactiveReadActionDisposable != nil) {
             if let interactiveReadActionDisposable = self.interactiveReadActionDisposable {
                 if !canRead {

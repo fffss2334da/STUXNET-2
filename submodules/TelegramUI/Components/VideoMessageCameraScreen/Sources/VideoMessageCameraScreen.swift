@@ -301,7 +301,10 @@ private final class VideoMessageCameraScreenComponent: CombinedComponent {
                 return
             }
             let currentTimestamp = CACurrentMediaTime()
-            if let lastFlipTimestamp = self.lastFlipTimestamp, currentTimestamp - lastFlipTimestamp < 1.0 {
+            // Camera reconfiguration itself is serialized by Camera's queue.
+            // A one-second UI throttle made the switch feel broken, especially
+            // on round videos. Keep only a short accidental-tap guard.
+            if let lastFlipTimestamp = self.lastFlipTimestamp, currentTimestamp - lastFlipTimestamp < 0.2 {
                 return
             }
             self.lastFlipTimestamp = currentTimestamp

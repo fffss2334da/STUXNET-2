@@ -12,7 +12,6 @@ import AccountContext
 import ContextUI
 import LegacyUI
 import AppBundle
-import SaveToCameraRoll
 import PresentationDataUtils
 import TelegramPresentationData
 import TelegramStringFormatting
@@ -1480,35 +1479,6 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
-        if resourceAvailable, !message.containsSecretMedia && !isCopyProtected {
-            var mediaReference: AnyMediaReference?
-            var isVideo = false
-            for media in message.effectiveMedia {
-                if let image = media as? TelegramMediaImage, let _ = largestImageRepresentation(image.representations) {
-                    mediaReference = ImageMediaReference.standalone(media: image).abstract
-                    break
-                } else if let file = media as? TelegramMediaFile, file.isVideo {
-                    mediaReference = FileMediaReference.standalone(media: file).abstract
-                    isVideo = true
-                    break
-                }
-            }
-            if let mediaReference = mediaReference {
-                actions.append(.action(ContextMenuActionItem(text: isVideo ? chatPresentationInterfaceState.strings.Gallery_SaveVideo : chatPresentationInterfaceState.strings.Gallery_SaveImage, icon: { theme in
-                    return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
-                }, action: { _, f in
-                    let _ = (saveToCameraRoll(context: context, userLocation: .peer(message.id.peerId), mediaReference: mediaReference)
-                             |> deliverOnMainQueue).startStandalone(completed: {
-                        Queue.mainQueue().after(0.2) {
-                            let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-                            controllerInteraction.presentControllerInCurrent(UndoOverlayController(presentationData: presentationData, content: .mediaSaved(text: isVideo ? presentationData.strings.Gallery_VideoSaved : presentationData.strings.Gallery_ImageSaved), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return true }), nil)
-                        }
-                    })
-                    f(.default)
-                })))
-            }
-        }
-        
         var downloadableMediaResourceInfos: [String] = []
         for media in message.effectiveMedia {
             if let file = media as? TelegramMediaFile {
@@ -1520,22 +1490,6 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     if let info = extractMediaResourceDebugInfo(resource: representation.resource) {
                         downloadableMediaResourceInfos.append(info)
                     }
-                }
-            }
-        }
-        
-        if !isCopyProtected {
-            for media in message.effectiveMedia {
-                if let file = media as? TelegramMediaFile {
-                    if file.isMusic {
-                        actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_SaveToFiles, icon: { theme in
-                            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Save"), color: theme.actionSheet.primaryTextColor)
-                        }, action: { _, f in
-                            controllerInteraction.saveMediaToFiles(message.id)
-                            f(.default)
-                        })))
-                    }
-                    break
                 }
             }
         }

@@ -38,6 +38,7 @@ CHAT_HISTORY_ENTRIES = ROOT / "submodules/TelegramUI/Sources/ChatHistoryEntriesF
 CHAT_HISTORY_NODE = ROOT / "submodules/TelegramUI/Sources/ChatHistoryListNode.swift"
 CHAT_INPUT_PANELS = ROOT / "submodules/TelegramUI/Sources/ChatInterfaceStateInputPanels.swift"
 CHAT_CONTROLLER = ROOT / "submodules/TelegramUI/Sources/ChatController.swift"
+CHAT_CONTEXT_MENUS = ROOT / "submodules/TelegramUI/Sources/ChatInterfaceStateContextMenus.swift"
 PEER = ROOT / "submodules/Postbox/Sources/Peer.swift"
 SIGNALS = ROOT / "submodules/SSignalKit/SwiftSignalKit/Source"
 
@@ -116,10 +117,10 @@ def static_regressions() -> None:
     if "var datePreset: Int = 0" not in fake_message_ui or '("Now", nil)' not in fake_message_ui:
         raise RuntimeError("new fake messages must default to the actual current date")
     conversation_picker = fake_message_ui.split("private func miraFakeConversationPickerController", 1)[1].split("private enum MiraFakeMessagesListEntry", 1)[0]
-    chat_index = conversation_picker.find("push(context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId)")
-    editor_index = conversation_picker.find("push(miraFakeMessageController(context: context, peerId: peerId))")
-    if chat_index < 0 or editor_index <= chat_index:
-        raise RuntimeError("selecting a Telegram user must open that chat and its message editor in the same peer")
+    chat_index = conversation_picker.find("makeChatController(context: context, chatLocation: .peer(id: peerId)")
+    remove_picker_index = conversation_picker.find("viewControllers.remove(at: pickerIndex)")
+    if chat_index < 0 or remove_picker_index < 0 or "push(miraFakeMessageController(context: context, peerId: peerId))" in conversation_picker:
+        raise RuntimeError("selecting a Telegram user must replace the picker with that peer's chat")
     peer_info = (ROOT / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift").read_text(encoding="utf-8")
     presence_gate = (ROOT / "submodules/TelegramCore/Sources/State/MiraCoreGate.swift").read_text(encoding="utf-8")
     presence_updates = (ROOT / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift").read_text(encoding="utf-8")
@@ -135,6 +136,7 @@ def static_regressions() -> None:
     chat_history_node = CHAT_HISTORY_NODE.read_text(encoding="utf-8")
     chat_input = CHAT_INPUT_PANELS.read_text(encoding="utf-8")
     chat_controller = CHAT_CONTROLLER.read_text(encoding="utf-8")
+    chat_context_menus = CHAT_CONTEXT_MENUS.read_text(encoding="utf-8")
     if "localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool)" not in chat_list:
         raise RuntimeError("chat list must receive local projection switches")
     if "message.id.namespace == Namespaces.Message.Local" not in chat_list or "fakeGiftMessageIds.contains(message.id)" not in chat_list:
@@ -145,6 +147,8 @@ def static_regressions() -> None:
         raise RuntimeError("chat history must receive local projection switches")
     if "fakeMessagesByMessageId[message.id]" not in chat_history or "fakeGiftMessageIds.contains(message.id)" not in chat_history:
         raise RuntimeError("chat history must filter only locally-owned fake rows")
+    if "fakeMessage.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages" not in chat_history:
+        raise RuntimeError("Stars projections must have an independent visibility switch")
     if "fakeMessagesByMessageId()" not in chat_history or "localChatMessageIds()" not in chat_history:
         raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
     if "private var fakeMessageByMessageId: [MessageId: FakeMessageRecord]" not in (ROOT / "submodules/TelegramCore/Sources/State/MiraMessageHistoryStore.swift").read_text(encoding="utf-8"):
@@ -155,6 +159,21 @@ def static_regressions() -> None:
         raise RuntimeError("fake channel composer must disappear when fake messages are disabled")
     if "immediateMiraSettings.fakeMessagesEnabled" not in chat_controller:
         raise RuntimeError("fake channel actions must be gated by fake messages setting")
+    if "miraGeneratedUrlEntities" not in engine or "TextEntitiesMessageAttribute(entities: textEntities)" not in engine:
+        raise RuntimeError("local messages must receive Telegram URL entities so chat links remain tappable")
+    if 'for prefix in ["t.me/", "telegram.me/", "fragment.com/"]' not in engine:
+        raise RuntimeError("bare Telegram chat links must be detected even when NSDataDetector misses them")
+    if "MiraFakeConversationDestination" not in fake_message_ui or 'path.first == "c"' not in fake_message_ui:
+        raise RuntimeError("new local conversations must accept public and known private Telegram chat links")
+    if "case .user = peer" in fake_message_ui:
+        raise RuntimeError("local conversations must support known groups and channels as well as users")
+    if "legacyICloudFilePicker" not in fake_message_ui or "File path or resource label" in fake_message_ui:
+        raise RuntimeError("fake media editor must use Telegram's file picker instead of raw paths")
+    fake_media_insertion = engine.split("public func miraAddFakeMediaMessages", 1)[1].split("public func miraAddFakeMediaMessage", 1)[0]
+    if "PaidStarsMessageAttribute" in fake_media_insertion:
+        raise RuntimeError("local Stars previews must not be marked as Telegram-paid messages")
+    if "saveToCameraRoll(" in chat_context_menus or "saveMediaToFiles(message.id)" in chat_context_menus:
+        raise RuntimeError("chat message context menus must not offer Photos or Files exports")
 
 
 def declaration(source: str, start: str, end: str | None = None) -> str:

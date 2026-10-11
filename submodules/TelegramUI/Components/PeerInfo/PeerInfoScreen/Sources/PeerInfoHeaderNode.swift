@@ -2039,9 +2039,13 @@ final class PeerInfoHeaderNode: ASDisplayNode {
         var subtitleRatingSize: CGSize?
         
         let miraSettings = self.context.sharedContext.immediateMiraSettings
-        if peer?.id == self.context.account.peerId, miraSettings.fakeRatingEnabled, let cachedData = cachedData as? CachedUserData, let serverRating = cachedData.starRating {
+        if peer?.id == self.context.account.peerId, miraSettings.fakeRatingEnabled, let cachedData = cachedData as? CachedUserData {
             let ratingValue = max(0, miraSettings.fakeRatingValue)
-            self.currentStarRating = TelegramStarRating(level: serverRating.level, currentLevelStars: serverRating.currentLevelStars, stars: ratingValue, nextLevelStars: serverRating.nextLevelStars)
+            // The local projection must still render for accounts without a
+            // server rating record. Reuse Telegram's current thresholds when
+            // available; otherwise start from a local 1,000-Star interval.
+            let ratingBase = cachedData.starRating ?? TelegramStarRating(level: 0, currentLevelStars: 0, stars: 0, nextLevelStars: 1000)
+            self.currentStarRating = ratingBase.withUpdatedTotalStars(ratingValue)
             self.currentPendingStarRating = nil
         } else if let cachedData = cachedData as? CachedUserData, let starRating = cachedData.starRating {
             self.currentStarRating = starRating

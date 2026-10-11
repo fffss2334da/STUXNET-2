@@ -3,6 +3,68 @@ import SwiftSignalKit
 import Postbox
 import TelegramApi
 
+/// Telegram stores URL entities with every message. Local projections must do
+/// the same or taps in a synthetic chat are treated as plain text.
+private func miraGeneratedUrlEntities(_ text: String) -> [MessageTextEntity] {
+    guard !text.isEmpty else {
+        return []
+    }
+    var entities: [MessageTextEntity] = []
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    let nsText = text as NSString
+
+    func append(_ candidate: NSRange, type: MessageTextEntityType = .Url) {
+        guard candidate.length > 0,
+              !entities.contains(where: { $0.range.overlaps(candidate.location ..< candidate.location + candidate.length) }) else {
+            return
+        }
+        entities.append(MessageTextEntity(range: candidate.location ..< candidate.location + candidate.length, type: type))
+    }
+
+    if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+        detector.enumerateMatches(in: text, options: [], range: range) { result, _, _ in
+            guard let result, result.resultType == .link else {
+                return
+            }
+            append(result.range)
+        }
+    }
+
+    // NSDataDetector intentionally ignores bare Telegram links such as
+    // `t.me/example` in a few system versions. Telegram accepts those links
+    // in messages, so add the same URL entity for a token that starts at a
+    // boundary and trim punctuation copied from prose.
+    for prefix in ["t.me/", "telegram.me/", "fragment.com/"] {
+        var searchRange = range
+        while searchRange.location < range.length {
+            let match = nsText.range(of: prefix, options: [.caseInsensitive], range: searchRange)
+            guard match.location != NSNotFound else {
+                break
+            }
+            let boundary = match.location == 0 || nsText.substring(with: NSRange(location: match.location - 1, length: 1)).rangeOfCharacter(from: CharacterSet.alphanumerics) == nil
+            if boundary {
+                var end = match.location + match.length
+                while end < range.length {
+                    let scalar = nsText.substring(with: NSRange(location: end, length: 1))
+                    if scalar.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+                        break
+                    }
+                    end += 1
+                }
+                while end > match.location, ".,!?;:)]}".contains(nsText.substring(with: NSRange(location: end - 1, length: 1))) {
+                    end -= 1
+                }
+                let visibleValue = nsText.substring(with: NSRange(location: match.location, length: end - match.location))
+                let normalizedValue = visibleValue.range(of: "://") == nil ? "https://\(visibleValue)" : visibleValue
+                append(NSRange(location: match.location, length: end - match.location), type: .TextUrl(url: normalizedValue))
+            }
+            let nextLocation = match.location + max(match.length, 1)
+            searchRange = NSRange(location: nextLocation, length: range.length - nextLocation)
+        }
+    }
+    return entities.sorted { $0.range.lowerBound < $1.range.lowerBound }
+}
+
 public enum EngineOutgoingMessageContent {
     case text(String, [MessageTextEntity])
     case file(FileMediaReference)
@@ -396,7 +458,11 @@ public extension TelegramEngine {
                 return .complete()
             }
             let account = self.account
-            guard MiraCoreGate.shared.snapshot(forAccountPeerId: account.peerId).fakeMessagesEnabled else {
+            let miraSettings = MiraCoreGate.shared.snapshot(forAccountPeerId: account.peerId)
+            guard miraSettings.fakeMessagesEnabled else {
+                return .complete()
+            }
+            guard !messages.contains(where: { $0.kind == .stars }) || miraSettings.fakeStarsEnabled else {
                 return .complete()
             }
             // Fake Stars are local currency. Refuse an outgoing batch before
@@ -407,7 +473,8 @@ public extension TelegramEngine {
                 }
                 return partial <= Int64.max - max(0, stars) ? partial + max(0, stars) : Int64.max
             }
-            guard account.miraFakeStarsLedger.canDebit(starsAmount) else {
+            if miraSettings.fakeStarsEnabled, outgoing, starsAmount > 0,
+               !account.miraFakeStarsLedger.canDebit(starsAmount) {
                 return .complete()
             }
             return account.postbox.transaction { transaction -> Void in
@@ -424,7 +491,7 @@ public extension TelegramEngine {
                     } else {
                         descriptor = FakeMessageMedia(kind: entry.kind)
                     }
-                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName, kind: entry.kind, media: descriptor)
+                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: miraGeneratedUrlEntities(entry.text), date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName, kind: entry.kind, media: descriptor)
                     let localMedia = miraFakeMessageMedia(record: record)
                     let displayText = miraFakeMessageDisplayText(record: record, text: entry.text, localMedia: localMedia)
                     var flags = StoreMessageFlags()
@@ -432,6 +499,11 @@ public extension TelegramEngine {
                         flags.insert(.Incoming)
                     }
                     let authorId: PeerId = outgoing ? account.peerId : (authorPeerId ?? peerId)
+                    var attributes: [MessageAttribute] = []
+                    let textEntities = miraGeneratedUrlEntities(displayText)
+                    if !textEntities.isEmpty {
+                        attributes.append(TextEntitiesMessageAttribute(entities: textEntities))
+                    }
                     storeMessages.append(StoreMessage(
                         peerId: peerId,
                         namespace: Namespaces.Message.Local,
@@ -447,7 +519,7 @@ public extension TelegramEngine {
                         forwardInfo: nil,
                         authorId: authorId,
                         text: displayText,
-                        attributes: [],
+                        attributes: attributes,
                         media: localMedia
                     ))
                     records.append(record)
@@ -475,7 +547,7 @@ public extension TelegramEngine {
                 var acceptedStarsRecordIds: [String] = []
                 var ledgerFailed = false
                 for record in records {
-                    guard record.kind == .stars else {
+                    guard record.kind == .stars, miraSettings.fakeStarsEnabled else {
                         continue
                     }
                     let amount = max(0, record.media?.stars ?? 0)
@@ -538,7 +610,8 @@ public extension TelegramEngine {
                 records.reserveCapacity(messages.count)
                 storeMessages.reserveCapacity(messages.count)
                 for entry in messages {
-                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName)
+                    let entities = miraGeneratedUrlEntities(entry.text)
+                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: entities, date: entry.date, outgoing: outgoing, authorPeerId: outgoing ? nil : authorPeerId?.toInt64(), authorName: outgoing ? nil : authorName)
                     var flags = StoreMessageFlags()
                     if !outgoing {
                         flags.insert(.Incoming)
@@ -559,7 +632,7 @@ public extension TelegramEngine {
                         forwardInfo: nil,
                         authorId: authorId,
                         text: entry.text,
-                        attributes: [],
+                        attributes: entities.isEmpty ? [] : [TextEntitiesMessageAttribute(entities: entities)],
                         media: []
                     )
                     records.append(record)
@@ -614,6 +687,7 @@ public extension TelegramEngine {
             let messageId = MessageId(peerId: peerId, namespace: existing.messageNamespace, id: existing.messageId)
             var prospective = existing
             prospective.text = text
+            prospective.entities = miraGeneratedUrlEntities(text)
             prospective.date = date
             if let outgoing {
                 prospective.outgoing = outgoing
@@ -636,6 +710,7 @@ public extension TelegramEngine {
                 }
                 var updated = existing
                 updated.text = text
+                updated.entities = prospective.entities
                 updated.date = date
                 if let outgoing {
                     updated.outgoing = outgoing
@@ -690,7 +765,14 @@ public extension TelegramEngine {
                         forwardInfo: forwardInfo,
                         authorId: prospective.outgoing ? account.peerId : (authorPeerId ?? currentMessage.author?.id ?? peerId),
                         text: displayText,
-                        attributes: currentMessage.attributes,
+                        attributes: {
+                            var attributes = currentMessage.attributes.filter { !($0 is TextEntitiesMessageAttribute) }
+                            let textEntities = miraGeneratedUrlEntities(displayText)
+                            if !textEntities.isEmpty {
+                                attributes.append(TextEntitiesMessageAttribute(entities: textEntities))
+                            }
+                            return attributes
+                        }(),
                         media: localMedia
                     ))
                 })
@@ -733,7 +815,8 @@ public extension TelegramEngine {
                 records.reserveCapacity(messages.count)
                 storeMessages.reserveCapacity(messages.count)
                 for entry in messages {
-                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, date: entry.date, outgoing: entry.outgoing, authorPeerId: entry.outgoing ? nil : authorPeerId?.toInt64(), authorName: entry.outgoing ? nil : authorName)
+                    let entities = miraGeneratedUrlEntities(entry.text)
+                    let record = FakeMessageRecord(messagePeerId: peerId.toInt64(), text: entry.text, entities: entities, date: entry.date, outgoing: entry.outgoing, authorPeerId: entry.outgoing ? nil : authorPeerId?.toInt64(), authorName: entry.outgoing ? nil : authorName)
                     var flags = StoreMessageFlags()
                     if !entry.outgoing {
                         flags.insert(.Incoming)
@@ -754,7 +837,7 @@ public extension TelegramEngine {
                         forwardInfo: nil,
                         authorId: authorId,
                         text: entry.text,
-                        attributes: [],
+                        attributes: entities.isEmpty ? [] : [TextEntitiesMessageAttribute(entities: entities)],
                         media: []
                     ))
                     records.append(record)

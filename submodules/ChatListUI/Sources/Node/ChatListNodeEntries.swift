@@ -608,8 +608,11 @@ struct ChatListContactPeer {
 func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, localProjectionSettings: (fakeMessages: Bool, fakeGifts: Bool, fakeStars: Bool), isMainTab: Bool) -> (entries: [ChatListNodeEntry], loading: Bool) {
     let messageHistoryStore = MiraMessageHistoryStore.store(for: accountPeerId)
     let fakeGiftsStore = MiraFakeGiftsStore.store(for: accountPeerId)
-    let fakeMessagesByMessageId = !localProjectionSettings.fakeMessages || !localProjectionSettings.fakeStars ? (messageHistoryStore?.fakeMessagesByMessageId() ?? [:]) : [:]
-    let fakeGiftMessageIds = !localProjectionSettings.fakeGifts ? (fakeGiftsStore?.localChatMessageIds() ?? []) : []
+    // Keep the ownership index available even when a projection is disabled;
+    // otherwise a local row is indistinguishable from a real Telegram row and
+    // remains visible in the chat list.
+    let fakeMessagesByMessageId = messageHistoryStore?.fakeMessagesByMessageId() ?? [:]
+    let fakeGiftMessageIds = fakeGiftsStore?.localChatMessageIds() ?? []
     var groupItems = view.groupItems
     if isMainTab && state.archiveStoryState != nil && groupItems.isEmpty {
         groupItems.append(EngineChatList.GroupItem(
@@ -702,7 +705,7 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
                 return true
             }
             if let fakeMessage = fakeMessagesByMessageId[message.id] {
-                return localProjectionSettings.fakeMessages && (fakeMessage.kind != .stars || localProjectionSettings.fakeStars)
+                return fakeMessage.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages
             }
             if fakeGiftMessageIds.contains(message.id) {
                 return localProjectionSettings.fakeGifts

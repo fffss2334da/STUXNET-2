@@ -70,15 +70,6 @@ extension PeerInfoScreenNode {
                 strongSelf.controller?.present(UndoOverlayController(presentationData: presentationData, content: .copy(text: presentationData.strings.Conversation_PhoneCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .current)
             }
             
-            var accountIsFromUS = false
-            if let accountPeer, case let .user(user) = accountPeer, let phone = user.phone {
-                if let (country, _) = lookupCountryIdByNumber(phone, configuration: strongSelf.context.currentCountriesConfiguration.with { $0 }) {
-                    if country.id == "US" {
-                        accountIsFromUS = true
-                    }
-                }
-            }
-            
             var isAnonymousNumber = false
             var items: [ContextMenuItem] = []
             
@@ -145,7 +136,7 @@ extension PeerInfoScreenNode {
                 )
             }
             var actions = ContextController.Items(content: .list(items))
-            if isAnonymousNumber && !accountIsFromUS {
+            if isAnonymousNumber {
                 let collectibleInfo = Promise<CollectibleItemInfoScreenInitialData?>()
                 collectibleInfo.set(strongSelf.context.sharedContext.makeCollectibleItemInfoScreenInitialData(context: strongSelf.context, peerId: strongSelf.peerId, subject: .phoneNumber(value)))
                 
