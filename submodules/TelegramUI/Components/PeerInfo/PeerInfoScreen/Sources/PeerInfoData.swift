@@ -1235,25 +1235,42 @@ func peerInfoScreenData(
             enum StatusInputData: Equatable {
                 case none
                 case presence(TelegramUserPresence)
-                case selfLastSeenJustNow
                 case bot(subscriberCount: Int32?)
                 case support
             }
             let status = Signal<PeerInfoStatusData?, NoError> { subscriber in
                 class Manager {
                     var currentValue: TelegramUserPresence? = nil
-                    var showSelfLastSeenJustNow = false
                     var updateManager: QueueLocalObject<PeerPresenceStatusManager>? = nil
                 }
                 let manager = Atomic<Manager>(value: Manager())
                 let notify: () -> Void = {
                     let data = manager.with { manager -> PeerInfoStatusData? in
-                        if manager.showSelfLastSeenJustNow {
-                            return PeerInfoStatusData(text: strings.LastSeen_JustNow, isActivity: false, isHiddenStatus: false, key: nil)
-                        }
                         if let presence = manager.currentValue {
-                            let timestamp = CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970
-                            let (text, isActivity) = stringAndActivityForUserPresence(strings: strings, dateTimeFormat: dateTimeFormat, presence: EnginePeer.Presence(presence), relativeTo: Int32(timestamp), expanded: true)
+                            let timestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
+                            if isMyProfile {
+                                // The account's own status is rendered from the
+                                // server supplied timestamp. Relative presence
+                                // formatting intentionally is not used here,
+                                // because it turns a fresh server timestamp into
+                                // the synthetic "Just now" label.
+                                let serverTimestamp = presence.lastActivity
+                                if serverTimestamp > 0 {
+                                    let text = humanReadableStringForTimestamp(
+                                        strings: strings,
+                                        dateTimeFormat: dateTimeFormat,
+                                        timestamp: serverTimestamp,
+                                        alwaysShowTime: true,
+                                        allowYesterday: true
+                                    ).string
+                                    return PeerInfoStatusData(text: text, isActivity: false, isHiddenStatus: false, key: nil)
+                                }
+                                if case let .present(until) = presence.status, until >= timestamp {
+                                    return PeerInfoStatusData(text: strings.Presence_online, isActivity: true, isHiddenStatus: false, key: nil)
+                                }
+                                return nil
+                            }
+                            let (text, isActivity) = stringAndActivityForUserPresence(strings: strings, dateTimeFormat: dateTimeFormat, presence: EnginePeer.Presence(presence), relativeTo: timestamp, expanded: true)
                             var isHiddenStatus = false
                             switch presence.status {
                             case .recently(let isHidden), .lastWeek(let isHidden), .lastMonth(let isHidden):
@@ -1274,15 +1291,10 @@ func peerInfoScreenData(
                         return .none
                     }
                     if user.id == context.account.peerId {
-                        // The account's own presence is server-authoritative. Ghost mode
-                        // controls outgoing presence packets, but must not replace the
-                        // timestamp Telegram returned for the profile view. Older cached
-                        // accounts may not have a presence yet, so retain the normal
-                        // Telegram fallback until the first server snapshot arrives.
                         if let presence = view.peerPresences[userPeerId] as? TelegramUserPresence {
                             return .presence(presence)
                         } else {
-                            return .selfLastSeenJustNow
+                            return .none
                         }
                     }
                     if user.isDeleted {
@@ -1309,20 +1321,12 @@ func peerInfoScreenData(
                         }
                     case .support:
                         subscriber.putNext(PeerInfoStatusData(text: strings.Bot_GenericSupportStatus, isActivity: false, key: nil))
-                    case .selfLastSeenJustNow:
-                        let _ = manager.with { manager -> Void in
-                            manager.currentValue = nil
-                            manager.showSelfLastSeenJustNow = true
-                            manager.updateManager = nil
-                        }
-                        notify()
                     default:
                         var presence: TelegramUserPresence?
                         if case let .presence(value) = inputData {
                             presence = value
                         }
                         let _ = manager.with { manager -> Void in
-                            manager.showSelfLastSeenJustNow = false
                             manager.currentValue = presence
                             if let presence = presence {
                                 let updateManager: QueueLocalObject<PeerPresenceStatusManager>

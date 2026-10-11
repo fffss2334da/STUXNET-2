@@ -107,7 +107,7 @@ configured.localPeerOverrides = [
     "123": MiraLocalPeerOverride(username: "@alice", tag: "@editor", phone: "+100", firstName: "Alice", lastName: "Editor", role: .administrator)
 ]
 roundTrip(configured)
-check(MiraSettings.defaultSettings.showRealLastSeen == false, "self Last Seen defaults to Just Now")
+check(MiraSettings.defaultSettings.showRealLastSeen == false, "legacy self Last Seen codec remains disabled")
 check(configured.localPeerOverride(forPeerId: 123)?.username == "alice", "local peer override username")
 check(configured.localPeerOverride(forPeerId: 123)?.tag == "editor", "local peer override tag")
 check(configured.localPeerOverride(forPeerId: 123)?.displayName == "Alice Editor", "local peer override display name")

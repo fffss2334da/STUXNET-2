@@ -1075,7 +1075,6 @@ private enum StuxnetPrivacySection: Int32 {
 
 private enum StuxnetPrivacyEntry: ItemListNodeEntry {
     case showLocalOnline(Bool)
-    case showRealLastSeen(Bool)
     case localPeerOverrides(Int)
     case autoClearClipboard(Bool)
     case hidePhoneNumber(Bool)
@@ -1096,7 +1095,7 @@ private enum StuxnetPrivacyEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .showLocalOnline, .showRealLastSeen, .localPeerOverrides, .autoClearClipboard, .hidePhoneNumber, .showPeerId, .filterZalgo, .screenshotEvasion, .streamerMode, .securityInfo:
+        case .showLocalOnline, .localPeerOverrides, .autoClearClipboard, .hidePhoneNumber, .showPeerId, .filterZalgo, .screenshotEvasion, .streamerMode, .securityInfo:
             return StuxnetPrivacySection.main.rawValue
         case .confirmationsHeader, .confirmJoinChannel, .confirmViewStory, .confirmCall, .confirmSendSticker, .confirmSendGif, .confirmSendVoice, .confirmationsInfo:
             return StuxnetPrivacySection.confirmations.rawValue
@@ -1107,8 +1106,6 @@ private enum StuxnetPrivacyEntry: ItemListNodeEntry {
         switch self {
         case .showLocalOnline:
             return 0
-        case .showRealLastSeen:
-            return 1
         case .localPeerOverrides:
             return 2
         case .autoClearClipboard:
@@ -1155,12 +1152,6 @@ private enum StuxnetPrivacyEntry: ItemListNodeEntry {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Show Local Online", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateSettings { settings in
                     settings.showLocalOnline = value
-                }
-            })
-        case let .showRealLastSeen(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Show Real Last Seen", value: value, sectionId: self.section, style: .blocks, updated: { value in
-                arguments.updateSettings { settings in
-                    settings.showRealLastSeen = value
                 }
             })
         case let .localPeerOverrides(count):

@@ -56,8 +56,10 @@ private final class AccountPresenceManagerImpl {
         let shouldExposeOnline = isOnline && MiraCoreGate.shared.snapshot(forAccountPeerId: self.accountPeerId).sendOnlinePackets
         let localStatus: UserPresenceStatus = shouldExposeOnline ? .present(until: Int32(clamping: Int64(now) + 60)) : .none
         let _ = self.postbox.transaction { transaction -> Void in
+            let persistedLastSeen = (transaction.getPeerPresence(peerId: self.accountPeerId) as? TelegramUserPresence)?.lastActivity
+            let serverLastSeen = MiraCoreGate.shared.serverLastSeen(forAccountPeerId: self.accountPeerId) ?? persistedLastSeen
             transaction.updatePeerPresencesInternal(
-                presences: [self.accountPeerId: TelegramUserPresence(status: localStatus, lastActivity: now)],
+                presences: [self.accountPeerId: TelegramUserPresence(status: localStatus, lastActivity: serverLastSeen ?? 0)],
                 merge: { _, updated in return updated }
             )
         }.start()

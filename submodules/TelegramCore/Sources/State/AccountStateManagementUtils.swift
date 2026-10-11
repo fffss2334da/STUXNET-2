@@ -4954,17 +4954,24 @@ func replayFinalState(
                 var presences: [PeerId: UpdatedApiPresence] = [:]
                 for (peerId, status) in statuses {
                     if peerId == accountPeerId {
-                        if explicit {
-                            switch status.status {
-                            case let .userStatusOnline(userStatusOnlineData):
+                        switch status.status {
+                        case let .userStatusOnline(userStatusOnlineData):
+                            if explicit {
                                 let timestamp = userStatusOnlineData.expires
                                 delayNotificatonsUntil = timestamp + 30
-                            case let .userStatusOffline(userStatusOfflineData):
-                                let timestamp = userStatusOfflineData.wasOnline
-                                delayNotificatonsUntil = timestamp
-                            default:
-                                break
                             }
+                        case let .userStatusOffline(userStatusOfflineData):
+                            let timestamp = userStatusOfflineData.wasOnline
+                            MiraCoreGate.shared.updateServerLastSeen(forAccountPeerId: accountPeerId, timestamp: timestamp)
+                            transaction.updatePeerPresenceInternal(peerId: accountPeerId, update: { previous in
+                                let currentStatus = (previous as? TelegramUserPresence)?.status ?? .none
+                                return TelegramUserPresence(status: currentStatus, lastActivity: timestamp)
+                            })
+                            if explicit {
+                                delayNotificatonsUntil = timestamp
+                            }
+                        default:
+                            break
                         }
                     } else {
                         presences[peerId] = status

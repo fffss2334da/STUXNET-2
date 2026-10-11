@@ -34,6 +34,11 @@ public final class MiraCoreGate {
     
     private let value = Atomic<MiraCoreGateSnapshot>(value: MiraCoreGateSnapshot())
     private let accountValues = Atomic<[PeerId: MiraCoreGateSnapshot]>(value: [:])
+    // Telegram does not keep the account's own status in the shared peer
+    // presence map. Keep the last server supplied `wasOnline` timestamp in a
+    // separate account-scoped cache so local presence packets cannot replace
+    // it with a device clock value.
+    private let serverLastSeenValues = Atomic<[PeerId: Int32]>(value: [:])
     
     public var snapshot: MiraCoreGateSnapshot {
         return self.value.with { $0 }
@@ -57,6 +62,29 @@ public final class MiraCoreGate {
     /// stale override behind for a later login.
     public func replaceAccountSnapshots(_ snapshots: [PeerId: MiraCoreGateSnapshot]) {
         let _ = self.accountValues.swap(snapshots)
+        let activeAccountIds = Set(snapshots.keys)
+        let _ = self.serverLastSeenValues.modify { values in
+            values.filter { activeAccountIds.contains($0.key) }
+        }
+    }
+
+    public func updateServerLastSeen(forAccountPeerId accountPeerId: PeerId, timestamp: Int32) {
+        guard timestamp > 0 else {
+            return
+        }
+        let _ = self.serverLastSeenValues.modify { values in
+            var values = values
+            if let current = values[accountPeerId] {
+                values[accountPeerId] = max(current, timestamp)
+            } else {
+                values[accountPeerId] = timestamp
+            }
+            return values
+        }
+    }
+
+    public func serverLastSeen(forAccountPeerId accountPeerId: PeerId) -> Int32? {
+        return self.serverLastSeenValues.with { $0[accountPeerId] }
     }
 
     /// Resolves the effective snapshot for an account without changing the

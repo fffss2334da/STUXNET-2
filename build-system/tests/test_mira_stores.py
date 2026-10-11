@@ -71,6 +71,15 @@ def static_regressions() -> None:
     fake_message_ui = FAKE_MESSAGE_UI.read_text(encoding="utf-8")
     if "var datePreset: Int = 0" not in fake_message_ui or '("Now", nil)' not in fake_message_ui:
         raise RuntimeError("new fake messages must default to the actual current date")
+    peer_info = (ROOT / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoData.swift").read_text(encoding="utf-8")
+    presence_gate = (ROOT / "submodules/TelegramCore/Sources/State/MiraCoreGate.swift").read_text(encoding="utf-8")
+    presence_updates = (ROOT / "submodules/TelegramCore/Sources/State/AccountStateManagementUtils.swift").read_text(encoding="utf-8")
+    if "case selfLastSeenJustNow" in peer_info or "strings.LastSeen_JustNow" in peer_info:
+        raise RuntimeError("own profile must never synthesize Last Seen Just now")
+    if "presence.lastActivity" not in peer_info or "humanReadableStringForTimestamp" not in peer_info:
+        raise RuntimeError("own profile must render the server presence timestamp")
+    if "updateServerLastSeen" not in presence_gate or "userStatusOfflineData.wasOnline" not in presence_updates:
+        raise RuntimeError("server wasOnline must be retained across local presence updates")
 
 
 def declaration(source: str, start: str, end: str | None = None) -> str:
