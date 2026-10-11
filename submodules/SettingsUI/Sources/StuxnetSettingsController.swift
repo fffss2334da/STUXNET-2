@@ -417,7 +417,10 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
                         arguments.updateSettings { settings in
                             settings = .defaultSettings
                         }
+                        arguments.context.account.miraMessageHistoryStore.clear(account: arguments.context.account)
                         arguments.context.account.miraFakeGiftsStore.clear(account: arguments.context.account)
+                        arguments.context.account.miraFakeChannelsStore.clear()
+                        arguments.context.account.miraLocalProfileOverridesStore.clear()
                         arguments.context.account.miraFakeStarsLedger.clear()
                     }),
                     TextAlertAction(type: .genericAction, title: "Cancel", action: {

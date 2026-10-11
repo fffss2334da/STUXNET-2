@@ -693,3 +693,34 @@ public final class MiraMessageHistoryStore {
         }
     }
 }
+
+extension MiraMessageHistoryStore {
+    /// Clears every local fake-message projection and removes its Postbox
+    /// rows first.  The plain `clear()` method is kept for storage-only
+    /// callers; reset flows should use this account-aware variant so a chat
+    /// cannot retain orphaned local messages after its durable records are
+    /// deleted.
+    public func clear(account: Account) {
+        guard !self.isFakeMessagesReadOnly else {
+            return
+        }
+        let messageIds: [MessageId] = self.queue.sync {
+            self.loadFakesIfNeeded()
+            return self.fakeCache.compactMap { record in
+                guard record.messageId != 0,
+                      record.messageNamespace == Namespaces.Message.Local,
+                      let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: record.messagePeerId) else {
+                    return nil
+                }
+                return MessageId(peerId: peerId, namespace: record.messageNamespace, id: record.messageId)
+            }
+        }
+        let _ = account.postbox.transaction { transaction in
+            if !messageIds.isEmpty {
+                transaction.deleteMessages(messageIds, forEachMedia: nil)
+            }
+        }.start(completed: { [weak self] in
+            self?.clear()
+        })
+    }
+}

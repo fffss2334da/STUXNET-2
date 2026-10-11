@@ -666,7 +666,13 @@ extension MiraFakeGiftsStore {
                     giftSignal = .single(nil)
                 }
             case .uniqueById:
-                giftSignal = .single(nil)
+                // Older local entries can contain only the collectible ids.
+                // Keep them visible without a network request by projecting a
+                // minimal Telegram-shaped unique gift.  It intentionally has
+                // no media attributes or server actions; the local profile
+                // and chat can still render the title/number and retain the
+                // synthetic reference while offline.
+                giftSignal = .single(self.offlineUniqueGift(for: entry, account: account))
             }
         }
 
@@ -774,6 +780,41 @@ extension MiraFakeGiftsStore {
                 )
             }
         }
+    }
+
+    /// Builds a deterministic placeholder for a persisted unique gift whose
+    /// server snapshot is unavailable.  This is a local projection only: no
+    /// catalog metadata, media, ownership signature or network action is
+    /// invented beyond the ids already stored in the fake-gift record.
+    private func offlineUniqueGift(for entry: MiraFakeGift, account: Account) -> StarGift {
+        let identifier = entry.giftId ?? entry.stableSavedId
+        let slug = entry.slug ?? ""
+        let title = slug.isEmpty ? "Collectible Gift" : slug
+        let number = entry.uniqueNumber ?? 0
+        let ownerPeerId = entry.ownerPeerId.flatMap { MiraFakeGift.peerId(fromStoredValue: $0, isPacked: true) } ?? account.peerId
+        return .unique(StarGift.UniqueGift(
+            id: identifier,
+            giftId: identifier,
+            title: title,
+            number: number,
+            slug: slug,
+            owner: .peerId(ownerPeerId),
+            attributes: [],
+            availability: StarGift.UniqueGift.Availability(issued: 0, total: 0),
+            giftAddress: nil,
+            resellAmounts: nil,
+            resellForTonOnly: false,
+            releasedBy: nil,
+            valueAmount: nil,
+            valueCurrency: nil,
+            valueUsdAmount: nil,
+            flags: [],
+            themePeerId: nil,
+            peerColor: nil,
+            hostPeerId: nil,
+            minOfferStars: nil,
+            craftChancePermille: nil
+        ))
     }
 }
 
