@@ -218,12 +218,21 @@ public struct MessageId: Hashable { public let peerId: PeerId; public let namesp
 public enum ProfileGiftsContext {
     public enum State {
         public struct StarGift: Codable, Equatable {
-            public enum Reference: Equatable { case peer(PeerId, Int64) }
+            public enum Reference: Equatable {
+                case peer(PeerId, Int64)
+                public var stringValue: String {
+                    switch self { case let .peer(peerId, savedId): return "peer:\(peerId.toInt64()):\(savedId)" }
+                }
+            }
             public var reference: Reference?
             public init(reference: Reference? = nil) { self.reference = reference }
+            private enum CodingKeys: String, CodingKey { case reference }
+            public init(from decoder: Decoder) throws { self.reference = nil }
+            public func encode(to encoder: Encoder) throws {}
         }
     }
 }
+public typealias StarGift = ProfileGiftsContext.State.StarGift
 public enum StarGiftReference { case peer(PeerId, Int64) }
 '''
 
