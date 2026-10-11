@@ -685,7 +685,19 @@ extension MiraFakeGiftsStore {
             guard let gift else {
                 return .single(nil)
             }
-            if entry.giftSnapshot == nil {
+            let shouldCacheResolvedSnapshot: Bool
+            switch entry.kind {
+            case .regular:
+                shouldCacheResolvedSnapshot = true
+            case .uniqueBySlug:
+                // The offline fallback uses the stable local reference id;
+                // never persist that placeholder over a missing server
+                // snapshot, otherwise a later reconnect could not refresh it.
+                shouldCacheResolvedSnapshot = gift.id != entry.stableSavedId
+            case .uniqueById:
+                shouldCacheResolvedSnapshot = false
+            }
+            if entry.giftSnapshot == nil && shouldCacheResolvedSnapshot {
                 self.updateSnapshot(id: entry.id, snapshot: gift)
             }
             return account.postbox.transaction { transaction -> ProfileGiftsContext.State.StarGift in
