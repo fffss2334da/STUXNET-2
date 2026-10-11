@@ -780,8 +780,12 @@ public extension TelegramEngine {
 
         public func miraRemoveFakeMessage(id: String) -> Signal<Void, NoError> {
             let account = self.account
-            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly,
-                  !account.miraFakeStarsLedger.isReadOnly else {
+            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly else {
+                return .complete()
+            }
+            if let record = account.miraMessageHistoryStore.fakeMessage(id: id),
+               record.kind == .stars,
+               account.miraFakeStarsLedger.isReadOnly {
                 return .complete()
             }
             return account.postbox.transaction { transaction -> Void in
@@ -799,11 +803,13 @@ public extension TelegramEngine {
 
         public func miraRemoveAllFakeMessages(peerId: PeerId) -> Signal<Void, NoError> {
             let account = self.account
-            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly,
-                  !account.miraFakeStarsLedger.isReadOnly else {
+            guard !account.miraMessageHistoryStore.isFakeMessagesReadOnly else {
                 return .complete()
             }
             let records = account.miraMessageHistoryStore.fakeMessages(in: peerId)
+            if records.contains(where: { $0.kind == .stars }) && account.miraFakeStarsLedger.isReadOnly {
+                return .complete()
+            }
             let ids = records.map { $0.id }
             return account.postbox.transaction { transaction -> Void in
                 let messageIds = records.compactMap { record -> MessageId? in
