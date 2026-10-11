@@ -1081,6 +1081,127 @@ public extension TelegramEngine {
         public func sendStarsReaction(id: EngineMessage.Id, count: Int, privacy: TelegramPaidReactionPrivacy?) -> Signal<TelegramPaidReactionPrivacy, NoError> {
             return _internal_sendStarsReactionsInteractively(account: self.account, messageId: id, count: count, privacy: privacy)
         }
+
+        /// Applies a Stars reaction to the local message projection without
+        /// installing a pending network action. This keeps the normal
+        /// reaction renderer and counters in sync when the account is using
+        /// the account-local Stars balance.
+        public func addLocalStarsReaction(id: EngineMessage.Id, count: Int, privacy: TelegramPaidReactionPrivacy?) -> Signal<Void, NoError> {
+            guard count > 0 else {
+                return .complete()
+            }
+            // The UI normally supplies a small Stars amount, but this entry
+            // point is also used by restored actions. Clamp before converting
+            // to Int32 so a corrupt/very large local amount cannot trap.
+            let increment = Int32(clamping: Int64(count))
+            guard increment > 0 else {
+                return .complete()
+            }
+            let account = self.account
+            return account.postbox.transaction { transaction -> Void in
+                guard let currentMessage = transaction.getMessage(id) else {
+                    return
+                }
+
+                func adding(_ value: Int32) -> Int32 {
+                    let value = max(0, value)
+                    return value > Int32.max - increment ? Int32.max : value + increment
+                }
+
+                var reactionsAttribute: ReactionsMessageAttribute?
+                for attribute in currentMessage.attributes {
+                    if let attribute = attribute as? ReactionsMessageAttribute {
+                        reactionsAttribute = attribute
+                        break
+                    }
+                }
+
+                var reactions = reactionsAttribute?.reactions ?? []
+                if let index = reactions.firstIndex(where: { $0.value == .stars }) {
+                    reactions[index].count = adding(reactions[index].count)
+                    reactions[index].chosenOrder = reactions[index].chosenOrder ?? 0
+                } else {
+                    reactions.append(MessageReaction(value: .stars, count: increment, chosenOrder: 0))
+                }
+
+                let senderPeerId: PeerId?
+                let isAnonymous: Bool
+                switch privacy ?? .default {
+                case .anonymous:
+                    senderPeerId = nil
+                    isAnonymous = true
+                case .default:
+                    senderPeerId = account.peerId
+                    isAnonymous = false
+                case let .peer(peerId):
+                    senderPeerId = peerId
+                    isAnonymous = false
+                }
+
+                var topPeers = reactionsAttribute?.topPeers ?? []
+                if let index = topPeers.firstIndex(where: { $0.isMy }) {
+                    topPeers[index].count = adding(topPeers[index].count)
+                    topPeers[index].peerId = senderPeerId
+                    topPeers[index].isAnonymous = isAnonymous
+                } else {
+                    topPeers.append(ReactionsMessageAttribute.TopPeer(peerId: senderPeerId, count: increment, isTop: false, isMy: true, isAnonymous: isAnonymous))
+                }
+
+                var recentPeers = reactionsAttribute?.recentPeers ?? []
+                recentPeers.append(ReactionsMessageAttribute.RecentPeer(value: .stars, isLarge: false, isUnseen: false, isMy: true, peerId: senderPeerId ?? account.peerId, timestamp: Int32(clamping: Int64(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970))))
+                // Telegram keeps this list bounded. Capping the local path
+                // prevents repeated local actions from growing a message
+                // attribute without limit while preserving the newest events.
+                if recentPeers.count > 50 {
+                    recentPeers.removeFirst(recentPeers.count - 50)
+                }
+
+                var attributes = currentMessage.attributes
+                attributes.removeAll(where: { attribute in
+                    attribute is ReactionsMessageAttribute || attribute is PendingStarsReactionsMessageAttribute
+                })
+                attributes.append(ReactionsMessageAttribute(
+                    canViewList: reactionsAttribute?.canViewList ?? false,
+                    isTags: reactionsAttribute?.isTags ?? false,
+                    reactions: reactions,
+                    recentPeers: recentPeers,
+                    topPeers: topPeers
+                ))
+
+                var forwardInfo: StoreMessageForwardInfo?
+                if let currentForwardInfo = currentMessage.forwardInfo {
+                    forwardInfo = StoreMessageForwardInfo(
+                        authorId: currentForwardInfo.author?.id,
+                        sourceId: currentForwardInfo.source?.id,
+                        sourceMessageId: currentForwardInfo.sourceMessageId,
+                        date: currentForwardInfo.date,
+                        authorSignature: currentForwardInfo.authorSignature,
+                        psaType: currentForwardInfo.psaType,
+                        flags: currentForwardInfo.flags
+                    )
+                }
+                transaction.updateMessage(id, update: { _ in
+                    return .update(StoreMessage(
+                        id: currentMessage.id,
+                        customStableId: nil,
+                        globallyUniqueId: currentMessage.globallyUniqueId,
+                        groupingKey: currentMessage.groupingKey,
+                        threadId: currentMessage.threadId,
+                        timestamp: currentMessage.timestamp,
+                        flags: StoreMessageFlags(currentMessage.flags),
+                        tags: currentMessage.tags,
+                        globalTags: currentMessage.globalTags,
+                        localTags: currentMessage.localTags,
+                        forwardInfo: forwardInfo,
+                        authorId: currentMessage.author?.id,
+                        text: currentMessage.text,
+                        attributes: attributes,
+                        media: currentMessage.media
+                    ))
+                })
+            }
+            |> ignoreValues
+        }
         
         public func cancelPendingSendStarsReaction(id: EngineMessage.Id) {
             let _ = cancelPendingSendStarsReactionInteractively(account: self.account, messageId: id).startStandalone()

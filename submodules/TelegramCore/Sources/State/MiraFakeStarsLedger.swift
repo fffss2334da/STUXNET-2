@@ -264,9 +264,9 @@ public final class MiraFakeStarsLedger {
         }
         let normalized = amount
         if outgoing {
-            return self.debit(normalized, kind: .fakeStarsMessage, relatedId: id, peerId: peerId, date: date, note: "Fake Stars message")
+            return self.debit(normalized, kind: .fakeStarsMessage, relatedId: id, peerId: peerId, date: date, note: "Stars message")
         } else {
-            return self.credit(normalized, kind: .fakeStarsMessage, relatedId: id, peerId: peerId, date: date, note: "Fake Stars message")
+            return self.credit(normalized, kind: .fakeStarsMessage, relatedId: id, peerId: peerId, date: date, note: "Stars message")
         }
     }
 
@@ -331,7 +331,7 @@ public final class MiraFakeStarsLedger {
                 nextBalance = self.balanceCache + delta
             }
             self.balanceCache = nextBalance
-            self.entriesCache.append(MiraFakeStarsLedgerEntry(date: date, delta: delta, balance: nextBalance, kind: .fakeStarsMessage, relatedId: "\(id):edit:\(UUID().uuidString)", peerId: peerId, note: "Fake Stars message edit"))
+            self.entriesCache.append(MiraFakeStarsLedgerEntry(date: date, delta: delta, balance: nextBalance, kind: .fakeStarsMessage, relatedId: "\(id):edit:\(UUID().uuidString)", peerId: peerId, note: "Stars message edit"))
             self.persistLocked()
             self.publishLocked()
             return true
@@ -388,7 +388,7 @@ public final class MiraFakeStarsLedger {
                 nextBalance = max(0, self.balanceCache + reversal)
             }
             self.balanceCache = nextBalance
-            self.entriesCache.append(MiraFakeStarsLedgerEntry(date: date, delta: reversal, balance: nextBalance, kind: .fakeStarsMessage, relatedId: removalId, peerId: peerId, note: "Deleted fake Stars message"))
+            self.entriesCache.append(MiraFakeStarsLedgerEntry(date: date, delta: reversal, balance: nextBalance, kind: .fakeStarsMessage, relatedId: removalId, peerId: peerId, note: "Deleted Stars message"))
             self.persistLocked()
             self.publishLocked()
             return true
@@ -400,7 +400,7 @@ public final class MiraFakeStarsLedger {
         guard fee >= 0 else {
             return false
         }
-        return self.debit(fee, kind: .fakeGiftTransfer, relatedId: id, peerId: peerId, date: date, note: "Fake gift transfer")
+        return self.debit(fee, kind: .fakeGiftTransfer, relatedId: id, peerId: peerId, date: date, note: "Gift transfer")
     }
 
     @discardableResult
@@ -408,7 +408,7 @@ public final class MiraFakeStarsLedger {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeGiftConversion, relatedId: id, peerId: peerId, date: date, note: "Fake gift conversion")
+        return self.credit(stars, kind: .fakeGiftConversion, relatedId: id, peerId: peerId, date: date, note: "Gift conversion")
     }
 
     /// Records Stars assigned to a local channel post. The related id is
@@ -419,7 +419,7 @@ public final class MiraFakeStarsLedger {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeChannelPost, relatedId: id, peerId: peerId, date: date, note: "Fake channel post Stars")
+        return self.credit(stars, kind: .fakeChannelPost, relatedId: id, peerId: peerId, date: date, note: "Channel post Stars")
     }
 
     /// Applies only the changed part of a local post's Stars total. Each
@@ -467,7 +467,7 @@ public final class MiraFakeStarsLedger {
                 kind: .fakeChannelPost,
                 relatedId: "\(id):edit:\(UUID().uuidString)",
                 peerId: peerId,
-                note: "Fake channel post Stars edit"
+                note: "Channel post Stars edit"
             ))
             self.persistLocked()
             self.publishLocked()
@@ -480,7 +480,7 @@ public final class MiraFakeStarsLedger {
         guard stars >= 0 else {
             return false
         }
-        return self.credit(stars, kind: .fakeChannelReaction, relatedId: id, peerId: peerId, date: date, note: "Fake channel Stars reactions")
+        return self.credit(stars, kind: .fakeChannelReaction, relatedId: id, peerId: peerId, date: date, note: "Channel Stars reactions")
     }
 
     /// Updates the two independent Stars counters stored on a local channel
@@ -560,7 +560,7 @@ public final class MiraFakeStarsLedger {
                     kind: .fakeChannelPost,
                     relatedId: "\(id):edit:post:\(UUID().uuidString)",
                     peerId: peerId,
-                    note: "Fake channel post Stars edit"
+                    note: "Channel post Stars edit"
                 ))
             }
             if reactionDeltaResult.partialValue != 0 {
@@ -572,7 +572,7 @@ public final class MiraFakeStarsLedger {
                     kind: .fakeChannelReaction,
                     relatedId: "\(id):edit:reaction:\(UUID().uuidString)",
                     peerId: peerId,
-                    note: "Fake channel Stars reaction edit"
+                    note: "Channel Stars reaction edit"
                 ))
             }
             self.persistLocked()

@@ -417,8 +417,9 @@ extension ChatControllerImpl {
                 guard let self, amount > 0 else {
                     return
                 }
+                let usesLocalStars = self.context.sharedContext.immediateMiraSettings.fakeStarsEnabled
                 
-                if case let .known(reactionSettings) = reactionSettings, let starsAllowed = reactionSettings.starsAllowed, !starsAllowed {
+                if !usesLocalStars, case let .known(reactionSettings) = reactionSettings, let starsAllowed = reactionSettings.starsAllowed, !starsAllowed {
                     if let peer = self.presentationInterfaceState.renderedPeer?.chatMainPeer {
                         self.present(textAlertController(context: self.context, updatedPresentationData: self.updatedPresentationData, title: nil, text: self.presentationData.strings.Chat_ToastStarsReactionsDisabled(peer.debugDisplayTitle).string, actions: [
                             TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_OK, action: {})
@@ -507,8 +508,16 @@ extension ChatControllerImpl {
                     }
                 }
                 
-                let _ = self.context.engine.messages.sendStarsReaction(id: message.id, count: Int(amount), privacy: privacy).startStandalone()
-                self.displayOrUpdateSendStarsUndo(messageId: message.id, count: Int(amount), privacy: privacy)
+                if usesLocalStars {
+                    let relatedId = "\(message.id.namespace):\(message.id.id):\(UUID().uuidString)"
+                    guard self.context.account.miraFakeStarsLedger.recordChannelReactionStars(id: relatedId, peerId: message.id.peerId.toInt64(), stars: amount) else {
+                        return
+                    }
+                    let _ = self.context.engine.messages.addLocalStarsReaction(id: message.id, count: Int(amount), privacy: privacy).startStandalone()
+                } else {
+                    let _ = self.context.engine.messages.sendStarsReaction(id: message.id, count: Int(amount), privacy: privacy).startStandalone()
+                    self.displayOrUpdateSendStarsUndo(messageId: message.id, count: Int(amount), privacy: privacy)
+                }
             })
             |> deliverOnMainQueue).start(next: { [weak self] initialData in
                 guard let self, let initialData else {

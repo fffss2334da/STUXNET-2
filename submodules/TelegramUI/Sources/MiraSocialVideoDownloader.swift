@@ -4,8 +4,8 @@ import Photos
 import TelegramUIPreferences
 
 /// Handles opt-in social-video downloads for links typed into a chat. The
-/// resolver downloads to a temporary local file and can either hand that file
-/// to the current chat or persist it using one of the legacy destinations.
+/// resolver downloads to a temporary local file and hands it to the current
+/// chat for upload.
 public final class MiraSocialVideoDownloadHandle {
     private let lock = NSLock()
     private var task: URLSessionDownloadTask?
@@ -90,12 +90,12 @@ public final class MiraSocialVideoDownloader {
     public static func enqueue(text: String, settings: MiraSocialVideoSettings) {
         let links = Self.links(in: text, settings: settings)
         // A chat upload needs a ChatController callback. This convenience API
-        // has no chat context, so it only serves the explicit legacy export
-        // destinations and never leaves an unreferenced cache file.
-        guard settings.destination != .chat, !settings.confirmBeforeDownload else {
+        // has no chat context, so the actual send is started by ChatController.
+        // Never resolve a link here into an unowned cache file.
+        guard !settings.confirmBeforeDownload else {
             return
         }
-        Self.enqueue(links: links, settings: settings)
+        _ = links
     }
 
     /// Removes stale completed chat downloads. The active upload owns its
@@ -162,7 +162,7 @@ public final class MiraSocialVideoDownloader {
         }
         for link in enabledLinks {
             queue.async {
-                Self.resolveAndDownload(link: link, destination: settings.destination, quality: settings.quality, handle: MiraSocialVideoDownloadHandle(), progress: nil, completion: nil)
+                Self.resolveAndDownload(link: link, destination: .chat, quality: settings.quality, handle: MiraSocialVideoDownloadHandle(), progress: nil, completion: nil)
             }
         }
     }

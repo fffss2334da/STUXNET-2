@@ -71,7 +71,7 @@ public func miraLocalEditController(context: AccountContext, messageId: MessageI
 
     let signal = context.sharedContext.presentationData
     |> map { presentationData -> (ItemListControllerState, (ItemListNodeState, MiraLocalEditControllerArguments)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Edit locally"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: .regular, enabled: true, action: {
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Edit message"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: .regular, enabled: true, action: {
             if state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let _ = context.engine.messages.miraRemoveLocalMessageOverride(messageId: messageId).start()
             } else {
@@ -81,7 +81,7 @@ public func miraLocalEditController(context: AccountContext, messageId: MessageI
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
         let entries: [MiraLocalEditEntry] = [
             .input(state.text),
-            .hint("Only you can see this version of the message. Save an empty text to revert.")
+            .hint("Save an empty text to remove the edit.")
         ]
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
 

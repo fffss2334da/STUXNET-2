@@ -58,12 +58,13 @@ extension PeerInfoScreenNode {
     }
 
     func openChat(peerId: EnginePeer.Id?) {
+        let fallbackPeer = self.data?.chatPeer ?? self.data?.peer
         if let peerId {
             let _ = (self.context.engine.data.get(
                 TelegramEngine.EngineData.Item.Peer.Peer(id: peerId)
             )
             |> deliverOnMainQueue).startStandalone(next: { [weak self] peer in
-                guard let self, let peer else {
+                guard let self, let peer = peer ?? fallbackPeer else {
                     return
                 }
                 guard let navigationController = self.controller?.navigationController as? NavigationController else {
@@ -75,7 +76,7 @@ extension PeerInfoScreenNode {
             return
         }
         
-        if let peer = self.data?.peer, let navigationController = self.controller?.navigationController as? NavigationController {
+        if let peer = fallbackPeer, let navigationController = self.controller?.navigationController as? NavigationController {
             self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: self.context, chatLocation: .peer(peer), keepStack: .default))
         }
     }

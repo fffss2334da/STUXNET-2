@@ -186,7 +186,7 @@ private enum MiraFakeMessageEntry: ItemListNodeEntry {
                 arguments.updated()
             })
         case let .mediaResource(value):
-            return ItemListSingleLineInputItem(presentationData: presentationData, title: NSAttributedString(), text: value, placeholder: "Local file path or resource label", type: .regular(capitalization: false, autocorrection: false), sectionId: self.section, textUpdated: { value in
+            return ItemListSingleLineInputItem(presentationData: presentationData, title: NSAttributedString(), text: value, placeholder: "File path or resource label", type: .regular(capitalization: false, autocorrection: false), sectionId: self.section, textUpdated: { value in
                 arguments.state.mediaResource = value
                 arguments.updated()
             }, action: {})
@@ -493,7 +493,7 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
 
     let signal = combineLatest(context.sharedContext.presentationData, versionPromise.get())
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, MiraFakeMessageControllerArguments)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(state.editingRecordId == nil ? "Add Fake Message" : "Edit Fake Message"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: state.isSubmitting ? .activity : .regular, enabled: !state.isSubmitting && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(state.editingRecordId == nil ? "Add Message" : "Edit Message"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: state.isSubmitting ? .activity : .regular, enabled: !state.isSubmitting && !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
             resolveSenderAndAdd()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
 
@@ -538,9 +538,9 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         } else {
             pendingCount = state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1
         }
-        let countHint = pendingCount > 0 ? " Ready to add \(pendingCount) local message\(pendingCount == 1 ? "" : "s")." : ""
+        let countHint = pendingCount > 0 ? " Ready to add \(pendingCount) message\(pendingCount == 1 ? "" : "s")." : ""
         let scriptHint = state.conversationMode ? "Conversation mode accepts me:/you:/them:/in: prefixes per line." : ""
-        entries.append(.hint("Messages stay on this device and are never sent to the server. \(state.oneMessagePerLine ? "Each non-empty line becomes a separate message." : "") \(scriptHint)\(countHint)"))
+        entries.append(.hint("\(state.oneMessagePerLine ? "Each non-empty line becomes a separate message." : "") \(scriptHint)\(countHint)"))
 
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
 
@@ -697,7 +697,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
                 ActionSheetButtonItem(title: presentationData.strings.Common_Delete, color: .destructive, action: { [weak actionSheet] in
                     actionSheet?.dismissAnimated()
                     let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-                    let controller = textAlertController(context: context, title: "Remove Fake Message?", text: "This local message will be removed from the chat.", actions: [
+                    let controller = textAlertController(context: context, title: "Remove Message?", text: "This message will be removed from the chat.", actions: [
                         TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
                         TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                             let _ = context.engine.messages.miraRemoveFakeMessage(id: record.id).start()
@@ -715,7 +715,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         presentControllerImpl?(actionSheet)
     }, confirmRemoveAll: {
         let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-        let controller = textAlertController(context: context, title: "Remove Fake Messages?", text: "All local fake messages in this chat will be removed.", actions: [
+        let controller = textAlertController(context: context, title: "Remove Messages?", text: "All added messages in this chat will be removed.", actions: [
             TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
             TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                 let _ = context.engine.messages.miraRemoveAllFakeMessages(peerId: peerId).start()
@@ -724,7 +724,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
         presentControllerImpl?(controller)
     }, confirmRemove: { record in
         let strings = context.sharedContext.currentPresentationData.with { $0.strings }
-        let controller = textAlertController(context: context, title: "Remove Fake Message?", text: "This local message will be removed from the chat.", actions: [
+        let controller = textAlertController(context: context, title: "Remove Message?", text: "This message will be removed from the chat.", actions: [
             TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {}),
             TextAlertAction(type: .destructiveAction, title: strings.Common_Delete, action: {
                 let _ = context.engine.messages.miraRemoveFakeMessage(id: record.id).start()
@@ -742,10 +742,10 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
             return lhs.date < rhs.date
         }
         var entries: [MiraFakeMessagesListEntry] = []
-        entries.append(.add("Add Fake Message"))
-        entries.append(.count(peerRecords.isEmpty ? "No local messages" : "\(peerRecords.count) local message\(peerRecords.count == 1 ? "" : "s")"))
+        entries.append(.add("Add Message"))
+        entries.append(.count(peerRecords.isEmpty ? "No messages" : "\(peerRecords.count) message\(peerRecords.count == 1 ? "" : "s")"))
         if peerRecords.isEmpty {
-            entries.append(.empty("Fake messages stay on this device and are never sent to Telegram."))
+            entries.append(.empty("No messages yet."))
         } else {
             for (index, record) in peerRecords.enumerated() {
                 let preview = record.text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -764,7 +764,7 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
                     if record.authorPeerId != nil {
                         direction = "From \(authorName)"
                     } else {
-                        direction = "Local label: \(authorName)"
+                        direction = "From \(authorName)"
                     }
                 } else {
                     direction = "From chat"
@@ -772,12 +772,12 @@ public func miraFakeMessagesController(context: AccountContext, peerId: PeerId) 
                 let readState = record.isRead ? "Read" : "Unread"
                 entries.append(.message(index, record, title, "\(direction) · \(miraFakeMessageKindTitle(record.kind)) · \(readState) · \(miraFakeMessageListDate(record.date))"))
             }
-            entries.append(.removeAll("Remove all fake messages"))
+            entries.append(.removeAll("Remove all messages"))
         }
 
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text("Fake Messages"),
+            title: .text("Messages"),
             leftNavigationButton: nil,
             rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: true, action: {
                 arguments.add()

@@ -134,7 +134,7 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
                 action: {}
             )
         case let .role(value):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Local role", label: value, sectionId: self.section, style: .blocks, action: {
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Role", label: value, sectionId: self.section, style: .blocks, action: {
                 let sheet = ActionSheetController(presentationData: arguments.context.sharedContext.currentPresentationData.with { $0 })
                 let select: (MiraFakeChannel.Role, String) -> ActionSheetButtonItem = { role, title in
                     return ActionSheetButtonItem(title: title, color: .accent, action: { [weak sheet] in
@@ -180,13 +180,13 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
             }
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Channel avatar", label: label, labelStyle: labelStyle, sectionId: self.section, style: .blocks, action: arguments.pickAvatar)
         case let .posts(count):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Local posts", label: "\(count)", sectionId: self.section, style: .blocks, action: arguments.openPosts)
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Posts", label: "\(count)", sectionId: self.section, style: .blocks, action: arguments.openPosts)
         case let .permissions(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case let .stats(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case .delete:
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Delete local channel", kind: .destructive, alignment: .center, sectionId: self.section, style: .blocks, action: {
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Remove Channel", kind: .destructive, alignment: .center, sectionId: self.section, style: .blocks, action: {
                 arguments.remove?()
             })
         case let .info(text):
@@ -218,7 +218,7 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
     |> map { presentationData, _, _ -> (ItemListControllerState, (ItemListNodeState, StuxnetLocalChannelEditorArguments)) in
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text(isNew ? "New Local Channel" : "Edit Local Channel"),
+            title: .text(isNew ? "Channel Settings" : "Edit Channel"),
             leftNavigationButton: nil,
             rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .regular, enabled: !store.isReadOnly && !arguments.channel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: {
                 guard !arguments.channel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -232,10 +232,10 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
         var entries: [StuxnetLocalChannelEditorEntry] = [
             .input(0, "Name", channel.title, "Channel name", false),
             .input(1, "Description", channel.about, "About this channel", false),
-            .input(2, "Username", channel.username ?? "", "local_channel", false),
+            .input(2, "Username", channel.username ?? "", "channel_username", false),
             .input(3, "Owner / admin tag", channel.adminTag ?? "", "Owner", false),
             .input(4, "Role label", channel.roleLabel ?? "", "Owner / Administrator", false),
-            .input(5, "Owner name", channel.ownerName ?? "", "Local owner display name", false),
+            .input(5, "Owner name", channel.ownerName ?? "", "Owner display name", false),
             .input(6, "Owner username", channel.ownerUsername ?? "", "@owner", false),
             .input(7, "Subscribers", String(channel.subscribers), "0", true),
             .input(8, "Channel Stars", String(channel.starsBalance), "0", true),
@@ -247,15 +247,15 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
             .visibility(channel.visibility == .publicChannel ? "Public" : "Private"),
             .posts(channel.posts.count),
             .permissions(channel.role == .member
-                ? "Member preview: Telegram channel editing controls are hidden and publishing is disabled."
-                : "Admin preview: this device shows Telegram-style channel editing and posting controls. Changes stay local and never call Telegram APIs."),
+                ? "Member access · posting is unavailable"
+                : "\(channel.role == .owner ? "Owner" : "Administrator") access · posting is available"),
             .stats("Stats · \(channel.subscribers) subscribers · \(channel.posts.count) posts · \(stuxnetSaturatingSum(channel.posts.map(\.views))) views · \(stuxnetSaturatingSum(channel.posts.map { $0.comments ?? 0 })) comments · \(stuxnetSaturatingSum(channel.posts.map { stuxnetSaturatingSum([$0.stars, $0.starReactions ?? 0]) })) Stars")
         ]
         if !isNew {
             entries.append(.delete)
         }
         if store.isReadOnly {
-            entries.append(.info("This local data was written by a newer or unreadable schema and is open read-only to prevent overwriting it."))
+            entries.append(.info("This channel is read-only on this version."))
         }
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (controllerState, (listState, arguments))
@@ -456,7 +456,7 @@ private func stuxnetLocalChannelPostEditorController(context: AccountContext, ch
     let signal = combineLatest(context.sharedContext.presentationData, revision.get())
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, StuxnetLocalChannelPostEditorArguments)) in
         let value = arguments.post
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(post == nil ? "New Local Post" : "Edit Local Post"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .regular, enabled: !store.isReadOnly && store.channel(id: channelId) != nil, action: {
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(post == nil ? "New Post" : "Edit Post"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .regular, enabled: !store.isReadOnly && store.channel(id: channelId) != nil, action: {
             if arguments.save(arguments.post) {
                 dismissImpl?()
             }
@@ -466,12 +466,12 @@ private func stuxnetLocalChannelPostEditorController(context: AccountContext, ch
             .input(1, "Views", String(value.views), "0", true),
             .input(2, "Stars", String(value.stars), "0", true),
             .media(value.mediaPath),
-            .input(3, "Media path", value.mediaPath ?? "", "Optional local media path", false),
+            .input(3, "Media path", value.mediaPath ?? "", "Optional media path", false),
             .input(4, "Date (Unix seconds)", String(value.date), "Current time", true),
             .input(5, "Reactions", value.reactions.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", "), "👍=12, ❤️=4", false),
             .input(6, "Stars from reactions", String(value.starReactions ?? 0), "0", true),
             .input(8, "Comments", String(value.comments ?? 0), "0", true),
-            .footer("Posts, reactions and Stars are local projections and never publish to Telegram.")
+            .footer("Posts, reactions and Stars")
         ]
         return (controllerState, (ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks), arguments))
     }
@@ -573,7 +573,7 @@ private enum StuxnetLocalChannelPostsEntry: ItemListNodeEntry {
                 noInsets: false
             )
         case .add:
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Add local post", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.add)
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Add Post", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.add)
         case let .post(post):
             let title: String
             if !post.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -654,7 +654,7 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
         let canPublish = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
         var entries: [StuxnetLocalChannelPostsEntry] = [.compose(arguments.composeText, canPublish), .add]
         entries.append(contentsOf: posts.map { .post($0) })
-        if posts.isEmpty { entries.append(.footer("Posts, views, Stars and reactions are local channel data.")) }
+        if posts.isEmpty { entries.append(.footer("Posts, views, Stars and reactions")) }
         let roleText = channel?.role == .owner ? "Owner" : (channel?.role == .administrator ? "Administrator" : "Member")
         let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("\(roleText) · Posts"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let list = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
@@ -668,11 +668,11 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
 }
 
 private final class StuxnetFakeChannelsArguments {
-    let add: () -> Void
+    let attach: () -> Void
     let edit: (MiraFakeChannel) -> Void
 
-    init(add: @escaping () -> Void, edit: @escaping (MiraFakeChannel) -> Void) {
-        self.add = add
+    init(attach: @escaping () -> Void, edit: @escaping (MiraFakeChannel) -> Void) {
+        self.attach = attach
         self.edit = edit
     }
 }
@@ -696,7 +696,7 @@ private enum StuxnetFakeChannelsEntry: ItemListNodeEntry {
         let arguments = arguments as! StuxnetFakeChannelsArguments
         switch self {
         case .add:
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Create local channel", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.add)
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Add existing Telegram channel", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.attach)
         case let .channel(channel):
             let role = channel.roleLabel ?? (channel.role == .owner ? "Owner" : (channel.role == .administrator ? "Admin" : "Member"))
             let owner = channel.ownerName.map { " · \($0)" } ?? ""
@@ -712,9 +712,66 @@ private enum StuxnetFakeChannelsEntry: ItemListNodeEntry {
 
 public func stuxnetFakeChannelsController(context: AccountContext) -> ViewController {
     var pushControllerImpl: ((ViewController) -> Void)?
+    var attachDisposable: Disposable?
     let store = context.account.miraFakeChannelsStore
-    let arguments = StuxnetFakeChannelsArguments(add: {
-        pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: MiraFakeChannel(title: ""), isNew: true))
+    let arguments = StuxnetFakeChannelsArguments(attach: {
+        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        let selector = context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(
+            context: context,
+            title: "Choose Telegram channels",
+            mode: .peerSelection(searchChatList: true, searchGroups: false, searchChannels: true),
+            filters: [.excludeSelf],
+            onlyWriteable: false,
+            alwaysEnabled: true,
+            isPeerEnabled: { peer in
+                if case .channel = peer {
+                    return true
+                }
+                return false
+            }
+        ))
+        pushControllerImpl?(selector)
+        attachDisposable = (selector.result |> take(1) |> deliverOnMainQueue).start(next: { [weak selector] result in
+            guard case let .result(peerIds, _) = result else { return }
+            let ids = peerIds.compactMap { peerId -> EnginePeer.Id? in
+                if case let .peer(id) = peerId { return id }
+                return nil
+            }
+            guard !ids.isEmpty else { return }
+            let _ = (context.engine.data.get(EngineDataMap(ids.map(TelegramEngine.EngineData.Item.Peer.Peer.init))) |> deliverOnMainQueue).start(next: { peerMap in
+                let selectedChannels: [TelegramChannel] = ids.compactMap { id in
+                    guard let peer = peerMap[id] ?? nil else { return nil }
+                    if case let .channel(channel) = peer {
+                        return channel
+                    }
+                    return nil
+                }
+                guard !selectedChannels.isEmpty else { return }
+                let selectedIds = selectedChannels.map { $0.id.toInt64() }
+                let existing = store.list().first(where: { channel in
+                    selectedIds.contains { id in
+                        channel.attachedPeerId == id || channel.attachedPeerIds?.contains(id) == true
+                    }
+                })
+                let firstChannel = selectedChannels[0]
+                let firstTitle = firstChannel.title
+                var channel = existing ?? MiraFakeChannel(title: firstTitle, username: firstChannel.username, attachedPeerId: selectedIds.first, attachedPeerIds: selectedIds)
+                var attachedIds = Set<Int64>(channel.attachedPeerIds ?? (channel.attachedPeerId.map { [$0] } ?? []))
+                attachedIds.formUnion(selectedIds)
+                let normalizedIds = attachedIds.sorted()
+                channel.attachedPeerId = normalizedIds.first
+                channel.attachedPeerIds = normalizedIds.isEmpty ? nil : normalizedIds
+                if existing == nil || channel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    channel.title = firstTitle
+                }
+                channel.role = .owner
+                store.upsert(channel)
+                if let navigationController = selector?.navigationController as? NavigationController, navigationController.topViewController === selector {
+                    _ = navigationController.popViewController(animated: false)
+                }
+                pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
+            })
+        })
     }, edit: { channel in
         pushControllerImpl?(stuxnetLocalChannelEditorController(context: context, channel: channel, isNew: false))
     })
@@ -723,11 +780,11 @@ public func stuxnetFakeChannelsController(context: AccountContext) -> ViewContro
         var entries: [StuxnetFakeChannelsEntry] = [.add]
         entries.append(contentsOf: channels.map { .channel($0) })
         if store.isReadOnly {
-            entries.append(.footer("Local channel data is read-only because its schema is newer or unreadable."))
+            entries.append(.footer("This channel cannot be edited on this version."))
         } else if channels.isEmpty {
-            entries.append(.footer("Channels created here are local to this account and do not exist on Telegram."))
+            entries.append(.footer("Choose an existing Telegram channel to manage its appearance and posting controls."))
         }
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Local Channels"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Channels"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (controllerState, (listState, arguments))
     }
@@ -811,7 +868,7 @@ public func stuxnetLocalProfilePreviewController(context: AccountContext) -> Vie
     |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, StuxnetLocalProfileOverrideArguments)) in
         let controllerState = ItemListControllerState(
             presentationData: ItemListPresentationData(presentationData),
-            title: .text("Local Profile Preview"),
+            title: .text("Profile"),
             leftNavigationButton: nil,
             rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .regular, enabled: !store.isReadOnly, action: {
                 arguments.save(arguments.value)
@@ -827,7 +884,7 @@ public func stuxnetLocalProfilePreviewController(context: AccountContext) -> Vie
             .input(2, "Phone number", value.phoneNumber ?? "", "+1 555 0100"),
             .input(3, "First name", value.firstName ?? "", "First name"),
             .input(4, "Last name", value.lastName ?? "", "Last name"),
-            .footer(store.isReadOnly ? "Local profile data is read-only because its schema is newer or unreadable." : "These values change only this device's profile preview. Telegram account details remain unchanged.")
+            .footer(store.isReadOnly ? "This profile cannot be edited on this version." : "Username, tag, phone and name settings")
         ]
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
         return (controllerState, (listState, arguments))

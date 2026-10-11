@@ -177,17 +177,17 @@ public func stuxnetFakeGiftsController(context: AccountContext) -> ViewControlle
     |> map { presentationData, gifts -> (ItemListControllerState, (ItemListNodeState, Any)) in
         var entries: [StuxnetFakeGiftsControllerEntry] = []
         entries.append(.addGift("Add Gift"))
-        entries.append(.giftsHeader("Fake Gifts".uppercased()))
+        entries.append(.giftsHeader("GIFTS".uppercased()))
         var index = 0
         for gift in gifts {
             entries.append(.gift(index, gift, stuxnetFakeGiftTitle(gift), stuxnetFakeGiftSubtitle(gift)))
             index += 1
         }
         if gifts.isEmpty {
-            entries.append(.emptyText("No fake gifts yet. Added gifts appear on your own profile while Fake Gifts are enabled."))
+            entries.append(.emptyText("No gifts yet. Added gifts appear on your profile."))
         }
 
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Fake Gifts"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: true, action: {
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Gifts"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: true, action: {
             arguments.addGift()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
@@ -283,7 +283,7 @@ private struct StuxnetAddFakeGiftState: Equatable {
     var exactTimestamp: Int32?
     var isHidden: Bool = false
     var isSaved: Bool = false
-    var showInChat: Bool = false
+    var showInChat: Bool = true
     // Telegram's collectible transfer price is 25 Stars. Keep the value
     // visible in the editor so a newly-created NFT cannot accidentally be
     // persisted as a free transfer.
@@ -461,7 +461,7 @@ private enum StuxnetAddFakeGiftEntry: ItemListNodeEntry {
                 }
             })
         case let .showInChat(value):
-            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Show in Chat", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass, title: "Add gift message to chat", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 arguments.updateState { state in
                     state.showInChat = value
                 }
@@ -741,7 +741,7 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
         let alert = textAlertController(
             context: context,
             title: "Delete Gift?",
-            text: "This gift will be removed from your local profile preview and chat.",
+            text: "This gift will be removed from your profile and chat.",
             actions: [
                 TextAlertAction(type: .genericAction, title: currentPresentationData.strings.Common_Cancel, action: {}),
                 TextAlertAction(type: .defaultDestructiveAction, title: currentPresentationData.strings.Common_Delete, action: {
@@ -793,7 +793,7 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
         if state.kind != .regular {
             entries.append(.transferStarsInput(state.transferStarsText))
         }
-        entries.append(.footerInfo("Fake gifts stay local. NFT transfers use Telegram's 25 Stars fee and are recorded in the local Stars history."))
+        entries.append(.footerInfo("NFT transfers use Telegram's 25 Stars fee and appear in Stars history."))
 
         if existingGift != nil {
             entries.append(.deleteGift("Delete Gift"))
@@ -807,7 +807,7 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
             canSave = !stuxnetNormalizedGiftSlug(state.slugText).isEmpty && !state.isSaving
         }
 
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(existingGift != nil ? "Edit Fake Gift" : "Add Fake Gift"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .bold, enabled: canSave, action: {
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(existingGift != nil ? "Edit Gift" : "Add Gift"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text("Save"), style: .bold, enabled: canSave, action: {
             saveImpl()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks)
@@ -954,7 +954,7 @@ private func stuxnetFakeGiftPickerController(context: AccountContext, currentGif
         } else if gifts == nil {
             entries.append(.loading("Loading gifts..."))
         } else {
-            entries.append(.empty("No cached gifts available. Add a gift while online, then it will remain available here offline."))
+            entries.append(.empty("Gift catalog unavailable. Check your connection and try again."))
         }
 
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Select Gift"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
@@ -1127,8 +1127,8 @@ private func stuxnetFakeGiftDatePickerController(context: AccountContext, curren
         entries.append(.exactDate(exactDate, selectingDate))
         entries.append(.seconds(secondsText))
         let dateInfo = presentationData.strings.baseLanguageCode.hasPrefix("ru")
-            ? "Выберите готовую дату или укажите точную дату, время и секунды. Подарок останется только на этом устройстве."
-            : "Choose a preset or enter an exact date, time, and seconds. The gift stays on this device only."
+            ? "Выберите готовую дату или укажите точную дату, время и секунды."
+            : "Choose a preset or enter an exact date, time, and seconds."
         entries.append(.info(dateInfo))
 
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(presentationData.strings.baseLanguageCode.hasPrefix("ru") ? "Дата подарка" : "Gift Date"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .text(presentationData.strings.Common_Done), style: .bold, enabled: Int(secondsText).map { (0 ... 59).contains($0) } ?? false, action: {

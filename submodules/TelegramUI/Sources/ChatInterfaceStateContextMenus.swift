@@ -1641,7 +1641,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 })))
             }
             if MiraCoreGate.shared.snapshot(forAccountPeerId: context.account.peerId).localMessageEditEnabled {
-                actions.append(.action(ContextMenuActionItem(text: "Edit locally", icon: { theme in
+                actions.append(.action(ContextMenuActionItem(text: "Edit message", icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Pencil"), color: theme.actionSheet.primaryTextColor)
                 }, action: { c, _ in
                     let initialText = miraStore.override(for: message.id)?.text ?? message.text
@@ -1653,7 +1653,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     })
                 })))
                 if miraStore.override(for: message.id) != nil {
-                    actions.append(.action(ContextMenuActionItem(text: "Revert local edit", icon: { theme in
+                    actions.append(.action(ContextMenuActionItem(text: "Revert edit", icon: { theme in
                         return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Back"), color: theme.actionSheet.primaryTextColor)
                     }, action: { c, f in
                         let _ = context.engine.messages.miraRemoveLocalMessageOverride(messageId: message.id).start()
@@ -1662,7 +1662,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 }
             }
             if context.sharedContext.immediateMiraSettings.fakeMessagesEnabled {
-                actions.append(.action(ContextMenuActionItem(text: "Manage Fake Messages", icon: { theme in
+                actions.append(.action(ContextMenuActionItem(text: "Manage Messages", icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Customize"), color: theme.actionSheet.primaryTextColor)
                 }, action: { c, _ in
                     c?.dismiss(completion: {
@@ -1672,7 +1672,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                         navigationController.pushViewController(miraFakeMessagesController(context: context, peerId: message.id.peerId))
                     })
                 })))
-                actions.append(.action(ContextMenuActionItem(text: "Add Fake Message…", icon: { theme in
+                actions.append(.action(ContextMenuActionItem(text: "Add Message…", icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Add"), color: theme.actionSheet.primaryTextColor)
                 }, action: { c, _ in
                     c?.dismiss(completion: {
@@ -1684,7 +1684,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 })))
             }
             if let fake = miraStore.fakeMessage(messageId: message.id) {
-                actions.append(.action(ContextMenuActionItem(text: "Remove Fake Message", textColor: .destructive, icon: { theme in
+                actions.append(.action(ContextMenuActionItem(text: "Remove Message", textColor: .destructive, icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.actionSheet.destructiveActionTextColor)
                 }, action: { c, f in
                     let _ = context.engine.messages.miraRemoveFakeMessage(id: fake.id).start()

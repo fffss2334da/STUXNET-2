@@ -585,9 +585,11 @@ private final class GiftViewSheetContent: CombinedComponent {
         }
         
         func convertToStars() {
-            guard let controller = self.getController() as? GiftViewScreen, let starsContext = context.starsContext, let arguments = self.subject.arguments, let reference = arguments.reference, let fromPeerName = arguments.fromPeerCompactName, let convertStars = arguments.convertStars, let navigationController = controller.navigationController as? NavigationController else {
+            guard let controller = self.getController() as? GiftViewScreen, let arguments = self.subject.arguments, let reference = arguments.reference, let convertStars = arguments.convertStars, let navigationController = controller.navigationController as? NavigationController else {
                 return
             }
+            let starsContext = context.starsContext
+            let fromPeerName = arguments.fromPeerCompactName ?? ""
             
             let configuration = GiftConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
             let starsConvertMaxDate = arguments.date + configuration.convertToStarsPeriod
@@ -644,7 +646,7 @@ private final class GiftViewSheetContent: CombinedComponent {
                             
                             if let navigationController {
                                 Queue.mainQueue().after(2.5) {
-                                    starsContext.load(force: true)
+                                    starsContext?.load(force: true)
                                     
                                     let text: String
                                     if isChannelGift {
@@ -1229,12 +1231,28 @@ private final class GiftViewSheetContent: CombinedComponent {
                         }
                     })
                     
+                    let transferSignal: Signal<Never, TransferStarGiftError>
                     if let tranfserGiftImpl {
-                        return tranfserGiftImpl(transferStars == 0, reference, peerId)
+                        transferSignal = tranfserGiftImpl(transferStars == 0, reference, peerId)
                     } else {
-                        return (context.engine.payments.transferStarGift(prepaid: transferStars == 0, reference: reference, peerId: peerId)
-                        |> deliverOnMainQueue)
+                        transferSignal = context.engine.payments.transferStarGift(prepaid: transferStars == 0, reference: reference, peerId: peerId)
                     }
+                    return (transferSignal
+                    |> deliverOnMainQueue
+                    |> afterCompleted { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+                        |> deliverOnMainQueue).start(next: { [weak self] peer in
+                            guard let self, let peer else {
+                                return
+                            }
+                            Queue.mainQueue().after(0.2) {
+                                self.openPeer(peer, gifts: false, dismiss: true)
+                            }
+                        })
+                    })
                 })
                 controller.push(transferController)
             })

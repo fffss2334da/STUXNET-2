@@ -317,6 +317,19 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     let chatBackgroundNode: WallpaperBackgroundNode
     public private(set) var controllerInteraction: ChatControllerInteraction?
     var interfaceInteraction: ChatPanelInterfaceInteraction?
+
+    /// A channel attachment can project owner/admin controls locally even
+    /// when the real Telegram peer is read-only for this account. Text sent
+    /// through this path is intercepted below and stored in the local
+    /// projection, so the regular send button must still be available.
+    private func canSendMessagesInCurrentChat() -> Bool {
+        if let peerId = self.chatLocation.peerId,
+           let channel = self.context.account.miraFakeChannelsStore.channel(attachedTo: peerId),
+           channel.role != .member {
+            return true
+        }
+        return canSendMessagesToChat(self.presentationInterfaceState)
+    }
     
     let messageContextDisposable = MetaDisposable()
     let controllerNavigationDisposable = MetaDisposable()
@@ -2287,13 +2300,19 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                     }
                     self.chatDisplayNode.collapseInput()
                     self.updateChatPresentationInterfaceState(animated: true, interactive: false, {
-                        $0.updatedInterfaceState { $0.withUpdatedReplyMessageSubject(nil).withUpdatedSendMessageEffect(nil).withUpdatedPostSuggestionState(nil) }
+                        $0.updatedInterfaceState {
+                            $0.withUpdatedReplyMessageSubject(nil)
+                                .withUpdatedSendMessageEffect(nil)
+                                .withUpdatedPostSuggestionState(nil)
+                                .withUpdatedComposeInputState(ChatTextInputState(inputText: NSAttributedString()))
+                                .withUpdatedComposeDisableUrlPreviews([])
+                        }
                     })
                 })
                 return
             }
 
-            guard canSendMessagesToChat(strongSelf.presentationInterfaceState) else {
+            guard strongSelf.canSendMessagesInCurrentChat() else {
                 return
             }
             
@@ -3504,7 +3523,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: true, {
                     return $0.updatedInterfaceState {
                         let updatedState: ChatTextInputState
-                        if canSendMessagesToChat(strongSelf.presentationInterfaceState) {
+                        if strongSelf.canSendMessagesInCurrentChat() {
                             updatedState = f($0.effectiveInputState)
                         } else {
                             updatedState = ChatTextInputState()
@@ -3765,7 +3784,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             guard let self else {
                 return false
             }
-            return canSendMessagesToChat(self.presentationInterfaceState)
+            return self.canSendMessagesInCurrentChat()
         }, navigateToFirstDateMessage: { [weak self] timestamp, alreadyThere in
             guard let strongSelf = self else {
                 return
@@ -4506,7 +4525,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                         quote: quoteData,
                         innerSubject: nil
                     )
-                    if canSendMessagesToChat(self.presentationInterfaceState) {
+                    if self.canSendMessagesInCurrentChat() {
                         let _ = self.presentVoiceMessageDiscardAlert(action: {
                             self.updateChatPresentationInterfaceState(animated: true, interactive: true, { $0.updatedInterfaceState({ $0.withUpdatedReplyMessageSubject(replySubject) }).updatedSearch(nil).updatedShowCommands(false) }, completion: completion)
                             self.updateItemNodesSearchTextHighlightStates()

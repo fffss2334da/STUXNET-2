@@ -248,10 +248,10 @@ public struct MiraSocialVideoSettings: Codable, Equatable {
         let rawQuality = try container.decodeIfPresent(Int32.self, forKey: "quality") ?? MiraSocialVideoQuality.source.rawValue
         self.quality = MiraSocialVideoQuality(rawValue: rawQuality) ?? .source
         self.confirmBeforeDownload = try container.decodeIfPresent(Bool.self, forKey: "confirmBeforeDownload") ?? true
-        let rawDestination = try container.decodeIfPresent(Int32.self, forKey: "destination") ?? MiraSocialVideoDestination.chat.rawValue
-        // Version 1 used 0 = Files and 1 = Photos. Keep those persisted
-        // values readable while new settings default to the chat destination.
-        self.destination = MiraSocialVideoDestination(rawValue: rawDestination) ?? .chat
+        // Video links always resolve into the chat where they were sent. Older
+        // releases persisted export destinations; reading them as `.chat`
+        // prevents a legacy preference from writing to Files or Photos.
+        self.destination = .chat
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -261,7 +261,7 @@ public struct MiraSocialVideoSettings: Codable, Equatable {
         try container.encode(self.wifiOnly, forKey: "wifiOnly")
         try container.encode(self.quality.rawValue, forKey: "quality")
         try container.encode(self.confirmBeforeDownload, forKey: "confirmBeforeDownload")
-        try container.encode(self.destination.rawValue, forKey: "destination")
+        try container.encode(MiraSocialVideoDestination.chat.rawValue, forKey: "destination")
     }
 }
 

@@ -126,6 +126,10 @@ public extension TelegramEngine {
         }
         
         public func updateStarGiftAddedToProfile(reference: StarGiftReference, added: Bool) -> Signal<Never, NoError> {
+            if self.account.miraFakeGiftsStore.isLocalReference(reference, accountPeerId: self.account.peerId) {
+                self.account.miraFakeGiftsStore.updateLocalReference(reference, accountPeerId: self.account.peerId, added: added)
+                return .complete()
+            }
             return _internal_updateStarGiftAddedToProfile(account: self.account, reference: reference, added: added)
         }
         
@@ -134,6 +138,13 @@ public extension TelegramEngine {
         }
         
         public func transferStarGift(prepaid: Bool, reference: StarGiftReference, peerId: EnginePeer.Id) -> Signal<Never, TransferStarGiftError> {
+            // Local NFT references are account-local projections. Keep this
+            // interception in the public engine entry point as well as in
+            // ProfileGiftsContext so gifts opened from a chat never fall
+            // through to the Telegram API.
+            if self.account.miraFakeGiftsStore.isLocalReference(reference, accountPeerId: self.account.peerId) {
+                return self.account.miraFakeGiftsStore.transferLocalReference(account: self.account, reference: reference, recipientPeerId: peerId)
+            }
             return _internal_transferStarGift(account: self.account, prepaid: prepaid, reference: reference, peerId: peerId)
         }
         

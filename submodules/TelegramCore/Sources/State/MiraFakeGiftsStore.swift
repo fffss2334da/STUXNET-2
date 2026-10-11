@@ -96,7 +96,7 @@ public struct MiraFakeGift: Codable, Equatable {
         date: Int32,
         isHidden: Bool = false,
         isSaved: Bool = false,
-        showInChat: Bool = false,
+        showInChat: Bool = true,
         transferStars: Int64? = nil,
         chatMessagePeerId: Int64? = nil,
         chatMessageId: Int32? = nil,
@@ -143,7 +143,7 @@ public struct MiraFakeGift: Codable, Equatable {
         self.date = try container.decodeIfPresent(Int32.self, forKey: .date) ?? 0
         self.isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
         self.isSaved = try container.decodeIfPresent(Bool.self, forKey: .isSaved) ?? false
-        self.showInChat = try container.decodeIfPresent(Bool.self, forKey: .showInChat) ?? false
+        self.showInChat = try container.decodeIfPresent(Bool.self, forKey: .showInChat) ?? true
         let decodedTransferStars = try container.decodeIfPresent(Int64.self, forKey: .transferStars)
         if self.kind == .regular {
             self.transferStars = nil
@@ -1185,6 +1185,13 @@ extension MiraFakeGiftsStore {
                 let rollbackMessage = self.deleteChatMessageSignal(account: account, entry: inserted)
                 return ((rollbackMessage |> castError(TransferStarGiftError.self)) |> mapToSignal { _ -> Signal<Never, TransferStarGiftError> in
                     guard self.removeAndWait(id: inserted.id) else {
+                        return .fail(.generic)
+                    }
+                    // The pending recipient is only a durable intent while a
+                    // transfer is being committed. If the Stars debit fails,
+                    // clear it so the owner can retry with another recipient
+                    // after topping up the local balance.
+                    guard self.upsertAndWait(source) else {
                         return .fail(.generic)
                     }
                     return .fail(.generic)
