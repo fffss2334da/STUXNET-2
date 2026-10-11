@@ -824,7 +824,6 @@ public final class MiraFakeGiftsStore {
             self.loadIfNeeded()
             guard !self.readOnly else { return }
             let previousCount = self.cache.count
-            let previousCollections = self.collectionsCache
             self.cache.removeAll { entry in
                 guard let packedPeerId = entry.chatMessagePeerId,
                       let messageId = entry.chatMessageId,

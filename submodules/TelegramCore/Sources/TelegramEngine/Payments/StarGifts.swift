@@ -2794,7 +2794,7 @@ private final class ProfileGiftsContextImpl {
         // selected server sort to the remaining entries. Apply that same rule
         // after injecting local gifts so a local item cannot jump to a fixed
         // position or disappear when the collection is refreshed.
-        mergedUnpinned.sort { lhs, rhs in
+        mergedUnpinned.sort(by: { (lhs: ProfileGiftsContext.State.StarGift, rhs: ProfileGiftsContext.State.StarGift) in
             switch sorting {
             case .date:
                 if lhs.date != rhs.date {
@@ -2813,7 +2813,7 @@ private final class ProfileGiftsContextImpl {
             let lhsReference = lhs.reference?.stringValue ?? ""
             let rhsReference = rhs.reference?.stringValue ?? ""
             return lhsReference < rhsReference
-        }
+        })
         return pinnedReal + pinnedFakes + mergedUnpinned
     }
 
@@ -3925,6 +3925,19 @@ public enum StarGiftReference: Equatable, Hashable, Codable {
         case let .slug(slug):
             try container.encode(2 as Int32, forKey: .type)
             try container.encode(slug, forKey: .slug)
+        }
+    }
+}
+
+extension StarGiftReference {
+    var stringValue: String {
+        switch self {
+        case let .message(messageId):
+            return "message:\(messageId.peerId.toInt64()):\(messageId.namespace):\(messageId.id)"
+        case let .peer(peerId, id):
+            return "peer:\(peerId.toInt64()):\(id)"
+        case let .slug(slug):
+            return "slug:\(slug)"
         }
     }
 }

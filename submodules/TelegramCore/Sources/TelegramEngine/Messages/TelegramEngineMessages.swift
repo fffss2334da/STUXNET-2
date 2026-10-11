@@ -1209,7 +1209,6 @@ public extension TelegramEngine {
                     ))
                 })
             }
-            |> ignoreValues
         }
         
         public func cancelPendingSendStarsReaction(id: EngineMessage.Id) {
