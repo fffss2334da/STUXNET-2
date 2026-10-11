@@ -51,7 +51,7 @@ def static_regressions() -> None:
         raise RuntimeError("fake NFT signatures must not be synthesized from local editor fields")
     if "max(MiraFakeGift.defaultNFTTransferStars, source.transferStars ?? MiraFakeGift.defaultNFTTransferStars)" not in gifts_source:
         raise RuntimeError("local NFT transfers must debit the normalized 25-Star fee")
-    if "self.upsertAndWait(inserted)" not in gifts_source:
+    if "self.upsertAndWait(durableInserted)" not in gifts_source:
         raise RuntimeError("transferred local NFTs must durably persist the recipient-owned copy")
     if "miraFakeStarsLedger.snapshot().entries.reversed().first" not in gifts_source:
         raise RuntimeError("local NFT transfers must inspect a durable existing ledger entry before retry")
@@ -61,7 +61,7 @@ def static_regressions() -> None:
         raise RuntimeError("local NFT transfers must persist the selected recipient before staging")
     if "guard self.upsertAndWait(stagedSource) else" not in gifts_source:
         raise RuntimeError("local NFT transfers must persist the source intent before destination/ledger work")
-    if gifts_source.find("guard self.upsertAndWait(inserted) else") > gifts_source.find("recordGiftTransfer("):
+    if gifts_source.find("guard self.upsertAndWait(durableInserted) else") > gifts_source.find("recordGiftTransfer("):
         raise RuntimeError("local NFT recipient projection must be durable before charging Stars")
     if gifts_source.find("guard self.removeAndWait(id: source.id) else") < gifts_source.find("recordGiftTransfer("):
         raise RuntimeError("local NFT source removal must follow the durable Stars debit")
