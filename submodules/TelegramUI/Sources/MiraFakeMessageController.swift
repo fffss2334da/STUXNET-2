@@ -1154,11 +1154,8 @@ private enum MiraFakeMessagesHubEntry: ItemListNodeEntry {
             // bits made different users/channels overwrite each other's row
             // in long-lived fake-message lists.
             var hash: UInt64 = 14695981039346656037
-            let bytes = withUnsafeBytes(of: peerId.bigEndian) { Array($0) }
-            for byte in bytes {
-                hash ^= UInt64(byte)
-                hash = hash &* 1099511628211
-            }
+            hash ^= UInt64(bitPattern: peerId)
+            hash = hash &* 1099511628211
             let value = Int(truncatingIfNeeded: hash & 0x3fffffffffffffff)
             return value == 0 ? 1 : value
         case .empty:
@@ -1234,7 +1231,7 @@ private func miraFakeChatLabel(_ packedPeerId: Int64, isRussian: Bool) -> String
     default:
         kind = isRussian ? "Чат" : "Chat"
     }
-    return "(kind) · ID (numericId)"
+    return "\(kind) · ID \(numericId)"
 }
 
 /// Global fake-message manager. The old editor was only reachable from the
