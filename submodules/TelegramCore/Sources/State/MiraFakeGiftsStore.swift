@@ -1087,7 +1087,7 @@ extension MiraFakeGiftsStore {
         guard case let .peer(peerId, savedId) = reference,
               peerId == account.peerId,
               MiraFakeGift.isLocalSavedId(savedId),
-              var source = self.list().first(where: { $0.stableSavedId == savedId }),
+              let source = self.list().first(where: { $0.stableSavedId == savedId }),
               source.isUnique else {
             return .fail(.generic)
         }
@@ -1095,9 +1095,7 @@ extension MiraFakeGiftsStore {
         // restart or while offline. Use the same deterministic local
         // projection as the profile path so transfer still produces a
         // Telegram-shaped local action and remains fully account-local.
-        if source.giftSnapshot == nil {
-            source.giftSnapshot = self.offlineUniqueGift(for: source, account: account)
-        }
+        let resolvedSnapshot = source.giftSnapshot ?? self.offlineUniqueGift(for: source, account: account)
         let transferFee = max(MiraFakeGift.defaultNFTTransferStars, source.transferStars ?? MiraFakeGift.defaultNFTTransferStars)
         let recipientValue = recipientPeerId.toInt64()
         if let pendingRecipient = source.pendingTransferRecipientPeerId, pendingRecipient != recipientValue {
@@ -1138,6 +1136,7 @@ extension MiraFakeGiftsStore {
         }
 
         var transferred = source
+        transferred.giftSnapshot = resolvedSnapshot
         transferred.id = transferId
         transferred.fromPeerId = account.peerId.toInt64()
         transferred.fromPeerIdIsPacked = true
@@ -1160,7 +1159,13 @@ extension MiraFakeGiftsStore {
             // durably persisted. If the process stops after this point, a
             // retry sees the deterministic transfer id and can safely finish
             // cleanup without charging the fee twice.
-            guard self.upsertAndWait(inserted) else {
+            // Keep a transient offline placeholder out of durable storage so
+            // the recipient gift can refresh from Telegram after reconnect.
+            var durableInserted = inserted
+            if source.giftSnapshot == nil {
+                durableInserted.giftSnapshot = nil
+            }
+            guard self.upsertAndWait(durableInserted) else {
                 return .fail(.generic)
             }
             // Charge only after the recipient snapshot is durable. Ledger
