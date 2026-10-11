@@ -244,6 +244,7 @@ def source_for_harness() -> str:
     ):
         peer_id = remove_declaration(peer_id, method)
     gift_model = declaration(gifts, "public struct MiraFakeGift")
+    gift_collection = declaration(gifts, "public struct MiraFakeGiftCollection")
     gift_snapshot = declaration(gifts, "public struct MiraFakeGiftsSnapshot")
     gift_store = declaration(gifts, "public final class MiraFakeGiftsStore", "extension MiraFakeGiftsStore")
     ledger_kind = declaration(ledger, "public enum MiraFakeStarsLedgerEntryKind")
@@ -270,7 +271,7 @@ def source_for_harness() -> str:
     ]
     return "\n".join([DOUBLES, *signal_sources, peer_id, history_record,
                        history_local, history_kind, history_media, history_fake, history_snapshot, history_store,
-                       gift_model, gift_snapshot, gift_store, ledger_kind, ledger_entry, ledger_snapshot, ledger_store,
+                       gift_model, gift_collection, gift_snapshot, gift_store, ledger_kind, ledger_entry, ledger_snapshot, ledger_store,
                        fake_channel, fake_channels_snapshot, fake_channels_store, profile_override,
                        profile_overrides_snapshot, profile_overrides_store])
 
