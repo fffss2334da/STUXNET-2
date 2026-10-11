@@ -88,17 +88,19 @@ private final class StuxnetControllerArguments {
     let updateSettings: (@escaping (inout MiraSettings) -> Void) -> Void
     let updateGhostSettings: (@escaping (inout MiraGhostSettings) -> Void) -> Void
     let pushController: (ViewController) -> Void
+    let openFakeMessages: (() -> ViewController)?
     var presentController: ((ViewController) -> Void)?
 
-    init(context: AccountContext, updateSettings: @escaping (@escaping (inout MiraSettings) -> Void) -> Void, updateGhostSettings: @escaping (@escaping (inout MiraGhostSettings) -> Void) -> Void, pushController: @escaping (ViewController) -> Void) {
+    init(context: AccountContext, updateSettings: @escaping (@escaping (inout MiraSettings) -> Void) -> Void, updateGhostSettings: @escaping (@escaping (inout MiraGhostSettings) -> Void) -> Void, pushController: @escaping (ViewController) -> Void, openFakeMessages: (() -> ViewController)? = nil) {
         self.context = context
         self.updateSettings = updateSettings
         self.updateGhostSettings = updateGhostSettings
         self.pushController = pushController
+        self.openFakeMessages = openFakeMessages
     }
 }
 
-private func stuxnetControllerArguments(context: AccountContext, pushController: @escaping (ViewController) -> Void) -> StuxnetControllerArguments {
+private func stuxnetControllerArguments(context: AccountContext, pushController: @escaping (ViewController) -> Void, openFakeMessages: (() -> ViewController)? = nil) -> StuxnetControllerArguments {
     let accountManager = context.sharedContext.accountManager
     return StuxnetControllerArguments(context: context, updateSettings: { f in
         let _ = updateMiraSettingsInteractively(accountManager: accountManager, f).start()
@@ -108,7 +110,7 @@ private func stuxnetControllerArguments(context: AccountContext, pushController:
             f(&ghostSettings)
             settings.setGhostSettings(ghostSettings, forAccountPeerId: context.account.peerId)
         }).start()
-    }, pushController: pushController)
+    }, pushController: pushController, openFakeMessages: openFakeMessages)
 }
 
 private func stuxnetItemListController<Entry: ItemListNodeEntry>(context: AccountContext, title: String, arguments: StuxnetControllerArguments, entries: @escaping (MiraSettings) -> [Entry]) -> ViewController {
@@ -342,6 +344,7 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
     case fake
     case localChannels
     case localProfile
+    case fakeMessages
     case voiceChanger(Bool)
     case appearance
     case resetAll
@@ -349,7 +352,7 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .header, .intro, .ghost, .privacy, .spy, .fake, .localChannels, .localProfile, .voiceChanger, .appearance:
+        case .header, .intro, .ghost, .privacy, .spy, .fake, .localChannels, .localProfile, .fakeMessages, .voiceChanger, .appearance:
             return StuxnetHubSection.main.rawValue
         case .resetAll, .versionInfo:
             return StuxnetHubSection.actions.rawValue
@@ -372,14 +375,16 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
             return 4
         case .localProfile:
             return 5
-        case .voiceChanger:
+        case .fakeMessages:
             return 6
-        case .appearance:
+        case .voiceChanger:
             return 7
-        case .resetAll:
+        case .appearance:
             return 8
-        case .versionInfo:
+        case .resetAll:
             return 9
+        case .versionInfo:
+            return 10
         }
     }
 
@@ -418,6 +423,12 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: stuxnetLocalizedText(presentationData, ru: "Профиль", en: "Profile"), label: stuxnetLocalizedText(presentationData, ru: "Предпросмотр", en: "Preview"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetLocalProfilePreviewController(context: arguments.context))
             })
+        case .fakeMessages:
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: stuxnetLocalizedText(presentationData, ru: "Фейковые чаты", en: "Fake chats"), label: stuxnetLocalizedText(presentationData, ru: "Добавить и управлять", en: "Add and manage"), sectionId: self.section, style: .blocks, action: {
+                if let controller = arguments.openFakeMessages?() {
+                    arguments.pushController(controller)
+                }
+            })
         case let .voiceChanger(isEnabled):
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: PresentationResourcesSettings.voices, title: stuxnetLocalizedText(presentationData, ru: "Изменение голоса", en: "Voice Changer"), label: isEnabled ? stuxnetLocalizedText(presentationData, ru: "Вкл.", en: "On") : stuxnetLocalizedText(presentationData, ru: "Выкл.", en: "Off"), sectionId: self.section, style: .blocks, action: {
                 arguments.pushController(stuxnetVoiceChangerSettingsController(context: arguments.context))
@@ -450,7 +461,7 @@ private enum StuxnetHubEntry: ItemListNodeEntry {
     }
 }
 
-private func stuxnetHubEntries(settings: MiraSettings, accountPeerId: PeerId) -> [StuxnetHubEntry] {
+private func stuxnetHubEntries(settings: MiraSettings, accountPeerId: PeerId, showFakeMessages: Bool) -> [StuxnetHubEntry] {
     var entries: [StuxnetHubEntry] = []
     entries.append(.header(0, "STUXNET CONTROL CENTER"))
     entries.append(.intro("Локальные проекции Telegram\nНастройки ниже меняют отображение во всех чатах аккаунта и не отправляют данные в Telegram."))
@@ -462,6 +473,9 @@ private func stuxnetHubEntries(settings: MiraSettings, accountPeerId: PeerId) ->
     entries.append(.fake)
     entries.append(.localChannels)
     entries.append(.localProfile)
+    if showFakeMessages {
+        entries.append(.fakeMessages)
+    }
     entries.append(.header(3, "МЕДИА И ВИД"))
     entries.append(.voiceChanger(settings.voiceChangerEnabled))
     entries.append(.appearance)
@@ -470,19 +484,19 @@ private func stuxnetHubEntries(settings: MiraSettings, accountPeerId: PeerId) ->
     return entries
 }
 
-public func stuxnetSettingsController(context: AccountContext) -> ViewController {
+public func stuxnetSettingsController(context: AccountContext, openFakeMessages: (() -> ViewController)? = nil) -> ViewController {
     var pushControllerImpl: ((ViewController) -> Void)?
     var presentControllerImpl: ((ViewController) -> Void)?
 
     let arguments = stuxnetControllerArguments(context: context, pushController: { controller in
         pushControllerImpl?(controller)
-    })
+    }, openFakeMessages: openFakeMessages)
     arguments.presentController = { controller in
         presentControllerImpl?(controller)
     }
 
     let controller = stuxnetItemListController(context: context, title: "Stuxnet", arguments: arguments, entries: { settings in
-        return stuxnetHubEntries(settings: settings, accountPeerId: context.account.peerId)
+        return stuxnetHubEntries(settings: settings, accountPeerId: context.account.peerId, showFakeMessages: arguments.openFakeMessages != nil)
     })
     pushControllerImpl = { [weak controller] c in
         (controller?.navigationController as? NavigationController)?.pushViewController(c)
