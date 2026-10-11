@@ -225,7 +225,14 @@ public enum ProfileGiftsContext {
                 }
             }
             public var reference: Reference?
-            public init(reference: Reference? = nil) { self.reference = reference }
+            public var collectionIds: [Int32]?
+            public init(reference: Reference? = nil, collectionIds: [Int32]? = nil) {
+                self.reference = reference
+                self.collectionIds = collectionIds
+            }
+            public func withCollectionIds(_ collectionIds: [Int32]?) -> StarGift {
+                return StarGift(reference: self.reference, collectionIds: collectionIds)
+            }
             private enum CodingKeys: String, CodingKey { case reference }
             public init(from decoder: Decoder) throws { self.reference = nil }
             public func encode(to encoder: Encoder) throws {}
