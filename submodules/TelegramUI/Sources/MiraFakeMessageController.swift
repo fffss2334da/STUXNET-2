@@ -380,7 +380,8 @@ public func miraFakeMessageController(context: AccountContext, peerId: PeerId, e
         // Do this before sender resolution so an edit never performs a network
         // lookup for the label shown in the original fake message.
         if let editingRecordId = state.editingRecordId {
-            let _ = (context.engine.messages.miraUpdateFakeMessage(id: editingRecordId, text: texts[0], date: baseDate, kind: state.kind, media: mediaDescriptor)
+            let editAuthorPeerId = (!state.outgoing ? Int64(state.sender.trimmingCharacters(in: .whitespacesAndNewlines)) : nil).map { PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value($0)) }
+            let _ = (context.engine.messages.miraUpdateFakeMessage(id: editingRecordId, text: texts[0], date: baseDate, kind: state.kind, media: mediaDescriptor, outgoing: state.outgoing, authorPeerId: editAuthorPeerId, authorName: state.sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : state.sender.trimmingCharacters(in: .whitespacesAndNewlines))
             |> deliverOnMainQueue).start(next: { success in
                 state.isSubmitting = false
                 arguments.updated()

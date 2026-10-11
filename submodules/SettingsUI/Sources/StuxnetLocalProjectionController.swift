@@ -115,6 +115,9 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
                     case 8: channel.starsBalance = max(0, Int64(value) ?? 0)
                     case 9: channel.avatarPath = value.isEmpty ? nil : value
                     case 10: channel.inviteLink = value.isEmpty ? nil : value
+                    case 11:
+                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        channel.attachedPeerId = Int64(trimmed)
                     default: break
                     }
                     arguments.channel = channel
@@ -231,6 +234,7 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
             .avatar(channel.avatarPath),
             .input(9, "Avatar file path", channel.avatarPath ?? "", "Optional path (advanced)", false),
             .input(10, "Invite link", channel.inviteLink ?? "", "https://t.me/+...", false),
+            .input(11, "Attached Telegram channel ID", channel.attachedPeerId.map(String.init) ?? "", "Optional numeric peer ID", true),
             .role(channel.role == .owner ? "Owner" : (channel.role == .administrator ? "Administrator" : "Member")),
             .visibility(channel.visibility == .publicChannel ? "Public" : "Private"),
             .posts(channel.posts.count),

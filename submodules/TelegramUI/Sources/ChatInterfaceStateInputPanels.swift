@@ -31,10 +31,13 @@ func chatInputFormulaRenderResult(context: RichTextFormulaRenderContext) -> Rich
 }
 
 func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState: ChatPresentationInterfaceState, context: AccountContext, currentPanel: ChatInputPanelNode?, currentSecondaryPanel: ChatInputPanelNode?, textInputPanelNode: ChatTextInputPanelNode?, chatControllerInteraction: ChatControllerInteraction?, interfaceInteraction: ChatPanelInterfaceInteraction?) -> (primary: ChatInputPanelNode?, secondary: ChatInputPanelNode?) {
-    if let renderedPeer = chatPresentationInterfaceState.renderedPeer, renderedPeer.peer?.restrictionText(platform: "ios", contentSettings: context.currentContentSettings.with { $0 }) != nil {
+    let localAdminChannel = chatPresentationInterfaceState.renderedPeer?.peer.flatMap {
+        context.account.miraFakeChannelsStore.channel(attachedTo: $0.id)
+    }
+    if localAdminChannel == nil, let renderedPeer = chatPresentationInterfaceState.renderedPeer, renderedPeer.peer?.restrictionText(platform: "ios", contentSettings: context.currentContentSettings.with { $0 }) != nil {
         return (nil, nil)
     }
-    if chatPresentationInterfaceState.isNotAccessible && !canJoinInaccessibleCommunityChat(chatPresentationInterfaceState) {
+    if localAdminChannel == nil, chatPresentationInterfaceState.isNotAccessible && !canJoinInaccessibleCommunityChat(chatPresentationInterfaceState) {
         return (nil, nil)
     }
 
@@ -251,7 +254,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 case .active:
                     break
             }
-        } else if let channel = peer as? TelegramChannel {
+        } else if let channel = peer as? TelegramChannel, localAdminChannel == nil {
             var isMember: Bool = false
             switch channel.participationStatus {
             case .kicked:
@@ -440,8 +443,23 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                     return (panel, nil)
                 }
             }
+        } else if localAdminChannel?.role != .member {
+            // A configured local owner/admin projection deliberately reuses
+            // Telegram's composer node while bypassing server permissions.
+            displayInputTextPanel = true
         }
         
+        if localAdminChannel?.role == .member {
+            if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
+                return (currentPanel, nil)
+            } else {
+                let panel = ChatRestrictedInputPanelNode()
+                panel.context = context
+                panel.chatControllerInteraction = chatControllerInteraction
+                panel.interfaceInteraction = interfaceInteraction
+                return (panel, nil)
+            }
+        }
         displayInputTextPanel = true
     }
     

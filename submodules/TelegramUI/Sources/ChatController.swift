@@ -2260,7 +2260,39 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 }
             }
         }, sendMessage: { [weak self] text, sourceMessageId in
-            guard let strongSelf = self, canSendMessagesToChat(strongSelf.presentationInterfaceState) else {
+            guard let strongSelf = self else {
+                return
+            }
+
+            // An attached local owner/admin projection deliberately reuses
+            // Telegram's composer but stops before the network send path.
+            // The resulting Postbox message still renders in the real chat
+            // and is durable in the account-local fake history store.
+            if let peerId = strongSelf.chatLocation.peerId,
+               let localChannel = strongSelf.context.account.miraFakeChannelsStore.channel(attachedTo: peerId),
+               localChannel.role != .member {
+                let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty else {
+                    return
+                }
+                let _ = (strongSelf.context.engine.messages.miraAddFakeMessage(
+                    peerId: peerId,
+                    text: text,
+                    outgoing: true,
+                    date: Int32(Date().timeIntervalSince1970)
+                ) |> deliverOnMainQueue).start(completed: { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    self.chatDisplayNode.collapseInput()
+                    self.updateChatPresentationInterfaceState(animated: true, interactive: false, {
+                        $0.updatedInterfaceState { $0.withUpdatedReplyMessageSubject(nil).withUpdatedSendMessageEffect(nil).withUpdatedPostSuggestionState(nil) }
+                    })
+                })
+                return
+            }
+
+            guard canSendMessagesToChat(strongSelf.presentationInterfaceState) else {
                 return
             }
             

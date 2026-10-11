@@ -274,13 +274,15 @@ public final class MiraFakeStarsLedger {
     /// immutable original entry remains in history and the adjustment is a
     /// separate idempotent event.
     @discardableResult
-    public func adjustFakeStarsMessage(id: String, peerId: Int64, oldAmount: Int64, newAmount: Int64, outgoing: Bool, date: Int32 = MiraFakeStarsLedger.currentTimestamp()) -> Bool {
+    public func adjustFakeStarsMessage(id: String, peerId: Int64, oldAmount: Int64, newAmount: Int64, outgoing: Bool, newOutgoing: Bool? = nil, date: Int32 = MiraFakeStarsLedger.currentTimestamp()) -> Bool {
         guard oldAmount >= 0 && newAmount >= 0 else {
             return false
         }
         let oldValue = max(0, oldAmount)
         let newValue = max(0, newAmount)
-        guard oldValue != newValue else {
+        let effectiveOldOutgoing = outgoing
+        let effectiveNewOutgoing = newOutgoing ?? outgoing
+        guard oldValue != newValue || effectiveOldOutgoing != effectiveNewOutgoing else {
             return true
         }
         return self.queue.sync {
@@ -303,8 +305,8 @@ public final class MiraFakeStarsLedger {
                 currentEffect += entry.delta
             }
 
-            let oldEffect = outgoing ? -oldValue : oldValue
-            let newEffect = outgoing ? -newValue : newValue
+            let oldEffect = effectiveOldOutgoing ? -oldValue : oldValue
+            let newEffect = effectiveNewOutgoing ? -newValue : newValue
             if currentEffect == newEffect {
                 return true
             }
@@ -363,8 +365,13 @@ public final class MiraFakeStarsLedger {
                     return partial + entry.delta
                 }
             }
+            // The message store and ledger are persisted independently. A
+            // crash or an older snapshot can leave a fake message without a
+            // matching ledger entry; removing that message is already
+            // idempotently complete in that case. Keep the read-only guard
+            // above so a future schema is never silently mutated.
             guard self.entriesCache.contains(where: { $0.kind == .fakeStarsMessage && ($0.relatedId == id || $0.relatedId?.hasPrefix("\(id):edit:") == true) }) else {
-                return false
+                return true
             }
             let reversal: Int64
             if netDelta > 0 {

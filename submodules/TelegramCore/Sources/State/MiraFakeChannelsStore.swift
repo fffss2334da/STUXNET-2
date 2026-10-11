@@ -72,6 +72,10 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
     /// never become Telegram peers or network requests.
     public var ownerName: String?
     public var ownerUsername: String?
+    /// Telegram channel peer this local role projection is attached to. The
+    /// peer remains real and all edits stay in the local projection layer.
+    /// `nil` keeps the standalone constructor behaviour used by older files.
+    public var attachedPeerId: Int64?
     public var starsBalance: Int64
     public var posts: [Post]
     public let createdAt: Int32
@@ -90,6 +94,7 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
                 roleLabel: String? = nil,
                 ownerName: String? = nil,
                 ownerUsername: String? = nil,
+                attachedPeerId: Int64? = nil,
                 starsBalance: Int64 = 0,
                 posts: [Post] = [],
                 createdAt: Int32 = MiraFakeChannel.currentTimestamp(),
@@ -107,6 +112,7 @@ public struct MiraFakeChannel: Codable, Equatable, Identifiable {
         self.roleLabel = roleLabel
         self.ownerName = ownerName
         self.ownerUsername = ownerUsername
+        self.attachedPeerId = attachedPeerId
         self.starsBalance = max(0, starsBalance)
         self.posts = posts
         self.createdAt = createdAt
@@ -224,6 +230,19 @@ public final class MiraFakeChannelsStore {
 
     public func channel(id: String) -> MiraFakeChannel? {
         return self.queue.sync { self.loadIfNeeded(); return self.channelsCache.first(where: { $0.id == id }) }
+    }
+
+    /// Finds the local owner/admin projection attached to a real Telegram
+    /// channel. Returning the first matching entry keeps old snapshots with
+    /// duplicate attachments deterministic while still allowing several
+    /// unrelated channels to be configured.
+    public func channel(attachedTo peerId: PeerId) -> MiraFakeChannel? {
+        return self.queue.sync {
+            self.loadIfNeeded()
+            return self.channelsCache.first(where: {
+                $0.attachedPeerId == peerId.toInt64() && $0.role != .member
+            })
+        }
     }
 
     /// Returns a stable snapshot of all channels owned by the requested role.
