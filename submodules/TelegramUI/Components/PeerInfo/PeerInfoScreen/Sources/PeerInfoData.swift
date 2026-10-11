@@ -1593,7 +1593,17 @@ func peerInfoScreenData(
                 revenueContextAndState,
                 premiumGiftOptions,
                 webAppPermissions,
-                savedMusicContext.state,
+                // Local profile overrides are a render-only projection. Fold
+                // their change signal into an existing slot so the peer info
+                // pipeline recomputes projected names/handles immediately,
+                // without changing the combineLatest arity.
+                combineLatest(
+                    savedMusicContext.state,
+                    context.account.miraLocalProfileOverridesStore.changes
+                )
+                |> map { savedMusicState, _ in
+                    return savedMusicState
+                },
                 businessConnectedBot
             )
             |> mapToSignal { peerView, availablePanes, globalNotificationSettings, encryptionKeyFingerprint, status, hasStories, hasStoryArchive, recommendedBots, accountIsPremium, savedMessagesPeer, hasSavedMessagesChats, hasSavedMessages, hasSavedMessageTags, hasBotPreviewItems, personalChannel, privacySettings, starsRevenueContextAndState, revenueContextAndState, premiumGiftOptions, webAppPermissions, savedMusicState, businessConnectedBot -> Signal<PeerInfoScreenData, NoError> in

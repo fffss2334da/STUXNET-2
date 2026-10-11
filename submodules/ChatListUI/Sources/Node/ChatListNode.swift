@@ -1940,6 +1940,7 @@ public final class ChatListNode: ListViewImpl {
         let previousState = Atomic<ChatListNodeState>(value: self.currentState)
         let previousView = Atomic<ChatListNodeView?>(value: nil)
         let previousHideArchivedFolderByDefault = Atomic<Bool?>(value: nil)
+        let previousLocalProfileOverrides = Atomic<[MiraLocalProfileOverride]?>(value: nil)
         let currentRemovingItemId = self.currentRemovingItemId
         
         let savedMessagesPeer: Signal<EnginePeer?, NoError>
@@ -2190,9 +2191,10 @@ public final class ChatListNode: ListViewImpl {
             self.statePromise.get(),
             contacts,
             chatListFilters,
-            accountIsPremium
+            accountIsPremium,
+            context.account.miraLocalProfileOverridesStore.changes
         )
-        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium) -> Signal<ChatListNodeListViewTransition, NoError> in
+        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, localProfileOverrides) -> Signal<ChatListNodeListViewTransition, NoError> in
             let (update, filter) = updateAndFilter
             
             let previousHideArchivedFolderByDefaultValue = previousHideArchivedFolderByDefault.swap(hideArchivedFolderByDefault)
@@ -2661,6 +2663,12 @@ public final class ChatListNode: ListViewImpl {
                 forceAllUpdated = true
             }
             if accountIsPremium != previousAccountIsPremium.swap(accountIsPremium) {
+                forceAllUpdated = true
+            }
+            if localProfileOverrides != previousLocalProfileOverrides.swap(localProfileOverrides) {
+                // Profile overrides are a render-only projection and do not
+                // change the Postbox chat-list view. Force item updates so
+                // titles refresh immediately after a local edit.
                 forceAllUpdated = true
             }
             let presentationData = state.presentationData

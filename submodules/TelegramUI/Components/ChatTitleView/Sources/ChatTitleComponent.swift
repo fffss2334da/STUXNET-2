@@ -3,6 +3,7 @@ import UIKit
 import Postbox
 import Display
 import ComponentFlow
+import SwiftSignalKit
 import TelegramPresentationData
 import AccountContext
 import TelegramUIPreferences
@@ -100,6 +101,8 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
     private var contentData: ContentData?
     private var activities: ChatTitleComponent.Activities?
     private var networkState: AccountNetworkState?
+    private let localProfileOverridesDisposable = MetaDisposable()
+    private weak var localProfileOverridesContext: AccountContext?
     
     private var ignoreParentTransitionRequests: Bool = false
     public var requestUpdate: ((ContainedViewLayoutTransition) -> Void)?
@@ -156,6 +159,15 @@ public final class ChatNavigationBarTitleView: UIView, NavigationBarTitleView {
         )
         let isUpdated = self.contentData != contentData
         self.contentData = contentData
+
+        if self.localProfileOverridesContext !== context {
+            self.localProfileOverridesContext = context
+            self.localProfileOverridesDisposable.set((context.account.miraLocalProfileOverridesStore.changes
+            |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
+                self?.requestUpdate?(.immediate)
+            }))
+        }
+
         self.update(transition: transition)
         self.ignoreParentTransitionRequests = false
         
