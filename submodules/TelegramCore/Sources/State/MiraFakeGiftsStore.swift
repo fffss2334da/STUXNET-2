@@ -693,7 +693,10 @@ extension MiraFakeGiftsStore {
                 // The offline fallback uses the stable local reference id;
                 // never persist that placeholder over a missing server
                 // snapshot, otherwise a later reconnect could not refresh it.
-                shouldCacheResolvedSnapshot = gift.id != entry.stableSavedId
+                // A resolved server gift is cacheable; the deterministic
+                // offline fallback must not be written over the local
+                // reference or it would hide catalog data after reconnect.
+                shouldCacheResolvedSnapshot = gift != self.offlineUniqueGift(for: entry, account: account)
             case .uniqueById:
                 shouldCacheResolvedSnapshot = false
             }
