@@ -740,7 +740,7 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
                             continue
                         }
                         adjustedLocalState = true
-                        let adjustedCount = Int32(clamping: max(Int64(0), Int64(state.count) - Int64(fakeIncomingCount) + Int64(fakeUnreadCount)))
+                        let adjustedCount = Int32(clamping: max(Int64(fakeUnreadCount), Int64(state.count) - Int64(fakeIncomingCount) + Int64(fakeUnreadCount)))
                         switch state {
                         case let .idBased(maxIncomingReadId, maxOutgoingReadId, maxKnownId, _, markedUnread):
                             adjustedStates.append((namespace, .idBased(maxIncomingReadId: maxIncomingReadId, maxOutgoingReadId: maxOutgoingReadId, maxKnownId: maxKnownId, count: adjustedCount, markedUnread: markedUnread)))

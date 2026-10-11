@@ -157,7 +157,7 @@ def static_regressions() -> None:
         raise RuntimeError("chat history must filter only locally-owned fake rows")
     if "fakeMessage.kind == .stars ? localProjectionSettings.fakeStars : localProjectionSettings.fakeMessages" not in chat_history:
         raise RuntimeError("Stars projections must have an independent visibility switch")
-    if "fakeIncomingCount" not in chat_list or "fakeUnreadCount" not in chat_list or "_asReadCounters()" not in chat_list:
+    if "fakeIncomingCount" not in chat_list or "fakeUnreadCount" not in chat_list or "max(Int64(fakeUnreadCount)" not in chat_list or "_asReadCounters()" not in chat_list:
         raise RuntimeError("chat list unread badges must reconcile local fake read markers")
     if "fakeMessagesByMessageId()" not in chat_history or "localChatMessageIds()" not in chat_history:
         raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
