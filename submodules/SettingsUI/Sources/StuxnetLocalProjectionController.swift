@@ -33,6 +33,7 @@ private func stuxnetSaturatingSum(_ values: [Int64]) -> Int64 {
 }
 
 private final class StuxnetLocalChannelEditorArguments {
+    let context: AccountContext
     var channel: MiraFakeChannel
     let save: (MiraFakeChannel) -> Void
     let remove: (() -> Void)?
@@ -41,7 +42,8 @@ private final class StuxnetLocalChannelEditorArguments {
     var present: ((ViewController) -> Void)?
     let update: () -> Void
 
-    init(channel: MiraFakeChannel, save: @escaping (MiraFakeChannel) -> Void, remove: (() -> Void)?, openPosts: @escaping () -> Void, pickAvatar: @escaping () -> Void, update: @escaping () -> Void) {
+    init(context: AccountContext, channel: MiraFakeChannel, save: @escaping (MiraFakeChannel) -> Void, remove: (() -> Void)?, openPosts: @escaping () -> Void, pickAvatar: @escaping () -> Void, update: @escaping () -> Void) {
+        self.context = context
         self.channel = channel
         self.save = save
         self.remove = remove
@@ -133,7 +135,7 @@ private enum StuxnetLocalChannelEditorEntry: ItemListNodeEntry {
             )
         case let .role(value):
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: nil, title: "Local role", label: value, sectionId: self.section, style: .blocks, action: {
-                let sheet = ActionSheetController(presentationData: presentationData)
+                let sheet = ActionSheetController(presentationData: arguments.context.sharedContext.currentPresentationData.with { $0 })
                 let select: (MiraFakeChannel.Role, String) -> ActionSheetButtonItem = { role, title in
                     return ActionSheetButtonItem(title: title, color: .accent, action: { [weak sheet] in
                         var channel = arguments.channel
@@ -203,7 +205,7 @@ private func stuxnetLocalChannelEditorController(context: AccountContext, channe
         revisionValue += 1
         revision.set(revisionValue)
     }
-    let arguments = StuxnetLocalChannelEditorArguments(channel: channel, save: { value in
+    let arguments = StuxnetLocalChannelEditorArguments(context: context, channel: channel, save: { value in
         store.upsert(value)
     }, remove: isNew ? nil : {
         _ = store.remove(id: channel.id)
