@@ -79,6 +79,10 @@ private func stuxnetLocalizedText(_ presentationData: PresentationData, ru: Stri
     return presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? ru : en
 }
 
+private func stuxnetLocalizedText(_ presentationData: ItemListPresentationData, ru: String, en: String) -> String {
+    return presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? ru : en
+}
+
 private final class StuxnetControllerArguments {
     let context: AccountContext
     let updateSettings: (@escaping (inout MiraSettings) -> Void) -> Void

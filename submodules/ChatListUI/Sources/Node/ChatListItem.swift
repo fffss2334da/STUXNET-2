@@ -741,6 +741,27 @@ private func communitySourcePeer(peerData: ChatListItemContent.PeerData, message
     return nil
 }
 
+private func miraChatListTimestamp(strings: PresentationStrings, timestamp: Int32, relativeTo: Int32, dateTimeFormat: PresentationDateTimeFormat, isLocalMessage: Bool) -> String {
+    guard isLocalMessage else {
+        return stringForRelativeTimestamp(strings: strings, relativeTimestamp: timestamp, relativeTo: relativeTo, dateTimeFormat: dateTimeFormat)
+    }
+
+    var messageTime = time_t(timestamp)
+    var messageInfo = tm()
+    localtime_r(&messageTime, &messageInfo)
+    var currentTime = time_t(relativeTo)
+    var currentInfo = tm()
+    localtime_r(&currentTime, &currentInfo)
+
+    // Fake messages are local-only and may carry an explicitly entered second.
+    // Keep the normal Telegram day/week labels, but preserve HH:mm:ss for a
+    // local message created today so the chat list matches the editor preview.
+    if messageInfo.tm_year == currentInfo.tm_year && messageInfo.tm_yday == currentInfo.tm_yday {
+        return stringForShortTimestamp(hours: Int32(messageInfo.tm_hour), minutes: Int32(messageInfo.tm_min), seconds: Int32(messageInfo.tm_sec), dateTimeFormat: dateTimeFormat)
+    }
+    return stringForRelativeTimestamp(strings: strings, relativeTimestamp: timestamp, relativeTo: relativeTo, dateTimeFormat: dateTimeFormat)
+}
+
 public struct ChatListItemFilterData: Equatable {
     public var excludesArchived: Bool
     
@@ -3379,7 +3400,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 
                 let timestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
                 
-                dateText = stringForRelativeTimestamp(strings: item.presentationData.strings, relativeTimestamp: topIndex.timestamp, relativeTo: timestamp, dateTimeFormat: item.presentationData.dateTimeFormat)
+                dateText = miraChatListTimestamp(strings: item.presentationData.strings, timestamp: topIndex.timestamp, relativeTo: timestamp, dateTimeFormat: item.presentationData.dateTimeFormat, isLocalMessage: topIndex.id.namespace == Namespaces.Message.Local)
             } else {
                 dateText = ""
             }
