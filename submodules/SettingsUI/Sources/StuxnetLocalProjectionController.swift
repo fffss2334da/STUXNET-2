@@ -722,13 +722,13 @@ public func stuxnetFakeChannelsController(context: AccountContext) -> ViewContro
             mode: .peerSelection(searchChatList: true, searchGroups: false, searchChannels: true),
             filters: [.excludeSelf],
             onlyWriteable: false,
-            alwaysEnabled: true,
             isPeerEnabled: { peer in
                 if case .channel = peer {
                     return true
                 }
                 return false
-            }
+            },
+            alwaysEnabled: true
         ))
         pushControllerImpl?(selector)
         attachDisposable = (selector.result |> take(1) |> deliverOnMainQueue).start(next: { [weak selector] result in

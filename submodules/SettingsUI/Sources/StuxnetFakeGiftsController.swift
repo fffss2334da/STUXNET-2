@@ -843,9 +843,11 @@ public func stuxnetAddFakeGiftController(context: AccountContext, editing existi
 // MARK: - Regular gift picker (catalog)
 
 private final class StuxnetFakeGiftPickerArguments {
+    let context: AccountContext
     let select: (StarGift.Gift) -> Void
 
-    init(select: @escaping (StarGift.Gift) -> Void) {
+    init(context: AccountContext, select: @escaping (StarGift.Gift) -> Void) {
+        self.context = context
         self.select = select
     }
 
@@ -934,7 +936,7 @@ private enum StuxnetFakeGiftPickerEntry: ItemListNodeEntry {
 private func stuxnetFakeGiftPickerController(context: AccountContext, currentGiftId: Int64?, select: @escaping (StarGift.Gift) -> Void) -> ViewController {
     var dismissImpl: (() -> Void)?
 
-    let arguments = StuxnetFakeGiftPickerArguments(select: { gift in
+    let arguments = StuxnetFakeGiftPickerArguments(context: context, select: { gift in
         select(gift)
         dismissImpl?()
     })
