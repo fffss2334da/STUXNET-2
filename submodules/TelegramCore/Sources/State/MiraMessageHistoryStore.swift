@@ -226,6 +226,7 @@ public final class MiraMessageHistoryStore {
     private var overrideCache: [String: LocalOverrideRecord] = [:]
     private var didLoadOverrides = false
     private var fakeCache: [FakeMessageRecord] = []
+    private var fakeMessageByMessageId: [MessageId: FakeMessageRecord] = [:]
     private var didLoadFakes = false
     private var fakeMessagesReadOnly = false
 
@@ -338,6 +339,7 @@ public final class MiraMessageHistoryStore {
             self.cache.removeAll()
             self.overrideCache.removeAll()
             self.fakeCache.removeAll()
+            self.rebuildFakeMessageIndexLocked()
             try? FileManager.default.removeItem(atPath: self.filePath)
             try? FileManager.default.removeItem(atPath: self.overridesFilePath)
             try? FileManager.default.removeItem(atPath: self.fakeMessagesFilePath)
@@ -479,7 +481,20 @@ public final class MiraMessageHistoryStore {
             }
             self.fakeCache = orderedIds.compactMap { recordsById[$0] }
         }
+        self.rebuildFakeMessageIndexLocked()
         self.publishFakeMessagesLocked()
+    }
+
+    private func rebuildFakeMessageIndexLocked() {
+        var index: [MessageId: FakeMessageRecord] = [:]
+        index.reserveCapacity(self.fakeCache.count)
+        for record in self.fakeCache where record.messageId != 0 && record.messageNamespace == Namespaces.Message.Local {
+            guard let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: record.messagePeerId) else {
+                continue
+            }
+            index[MessageId(peerId: peerId, namespace: record.messageNamespace, id: record.messageId)] = record
+        }
+        self.fakeMessageByMessageId = index
     }
 
     private func publishFakeMessagesLocked() {
@@ -539,23 +554,14 @@ public final class MiraMessageHistoryStore {
     public func fakeMessagesByMessageId() -> [MessageId: FakeMessageRecord] {
         return self.queue.sync {
             self.loadFakesIfNeeded()
-            var result: [MessageId: FakeMessageRecord] = [:]
-            result.reserveCapacity(self.fakeCache.count)
-            for record in self.fakeCache where record.messageId != 0 && record.messageNamespace == Namespaces.Message.Local {
-                guard let peerId = MiraMessageHistoryStore.peerId(fromPackedValue: record.messagePeerId) else {
-                    continue
-                }
-                result[MessageId(peerId: peerId, namespace: record.messageNamespace, id: record.messageId)] = record
-            }
-            return result
+            return self.fakeMessageByMessageId
         }
     }
 
     public func fakeMessage(messageId: MessageId) -> FakeMessageRecord? {
         return self.queue.sync {
             self.loadFakesIfNeeded()
-            let peerIdValue = messageId.peerId.toInt64()
-            return self.fakeCache.first(where: { $0.messagePeerId == peerIdValue && $0.messageNamespace == messageId.namespace && $0.messageId == messageId.id && $0.messageId != 0 })
+            return self.fakeMessageByMessageId[messageId]
         }
     }
 
@@ -619,6 +625,7 @@ public final class MiraMessageHistoryStore {
                 changed.append(record)
             }
             guard !changed.isEmpty else { return }
+            self.rebuildFakeMessageIndexLocked()
             self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: changed, removedIds: nil))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()
@@ -646,6 +653,7 @@ public final class MiraMessageHistoryStore {
             var updatedRecord = record
             updatedRecord.isRead = self.fakeCache[index].isRead
             self.fakeCache[index] = updatedRecord
+            self.rebuildFakeMessageIndexLocked()
             self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: [updatedRecord], removedIds: nil))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()
@@ -668,6 +676,7 @@ public final class MiraMessageHistoryStore {
                 return true
             }
             self.fakeCache[index].isRead = isRead
+            self.rebuildFakeMessageIndexLocked()
             self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: [self.fakeCache[index]], removedIds: nil))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()
@@ -687,6 +696,7 @@ public final class MiraMessageHistoryStore {
                 return
             }
             self.fakeCache.removeAll(where: { $0.id == id })
+            self.rebuildFakeMessageIndexLocked()
             self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: nil, removedIds: [id]))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()
@@ -705,6 +715,7 @@ public final class MiraMessageHistoryStore {
                 return
             }
             self.fakeCache.removeAll(where: { idSet.contains($0.id) })
+            self.rebuildFakeMessageIndexLocked()
             self.appendFakeMessagesJournalLocked(FakeMessageJournalEntry(records: nil, removedIds: ids))
             self.persistFakeSnapshotLocked()
             self.publishFakeMessagesLocked()

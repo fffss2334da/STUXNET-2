@@ -147,6 +147,8 @@ def static_regressions() -> None:
         raise RuntimeError("chat history must filter only locally-owned fake rows")
     if "fakeMessagesByMessageId()" not in chat_history or "localChatMessageIds()" not in chat_history:
         raise RuntimeError("chat history must batch local store lookups instead of scanning per row")
+    if "private var fakeMessageByMessageId: [MessageId: FakeMessageRecord]" not in (ROOT / "submodules/TelegramCore/Sources/State/MiraMessageHistoryStore.swift").read_text(encoding="utf-8"):
+        raise RuntimeError("fake-message lookup must use the maintained Postbox id index")
     if "chatHistoryNode_localProjectionSettings" not in chat_history_node:
         raise RuntimeError("open chat history must refresh when local projection switches change")
     if "fakeMessagesEnabled ? chatPresentationInterfaceState.renderedPeer?.peer.flatMap" not in chat_input:
