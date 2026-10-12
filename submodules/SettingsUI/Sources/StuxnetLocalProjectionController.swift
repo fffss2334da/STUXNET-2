@@ -680,7 +680,6 @@ private func stuxnetLocalChannelPostsController(context: AccountContext, channel
         entries.append(.add)
         entries.append(contentsOf: posts.map { .post($0) })
         if posts.isEmpty { entries.append(.footer(presentationData.strings.baseLanguageCode.lowercased().hasPrefix("ru") ? "Публикации, просмотры и реакции появятся здесь" : "Posts, views and reactions appear here")) }
-        let canPublish = !store.isReadOnly && (channel?.role == .owner || channel?.role == .administrator)
         let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(channel?.title ?? "Channel"), leftNavigationButton: nil, rightNavigationButton: ItemListNavigationButton(content: .icon(.add), style: .regular, enabled: canPublish, action: {
             arguments.add()
         }), backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: true)
