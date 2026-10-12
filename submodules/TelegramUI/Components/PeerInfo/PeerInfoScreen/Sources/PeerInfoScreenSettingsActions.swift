@@ -295,9 +295,7 @@ extension PeerInfoScreenNode {
                 push(self.context.sharedContext.makeStarsTransactionsScreen(context: self.context, starsContext: tonContext))
             }
         case .stuxnet:
-            push(stuxnetSettingsController(context: self.context, openFakeMessages: { [context = self.context] in
-                return miraFakeMessagesHubController(context: context)
-            }))
+            push(stuxnetSettingsController(context: self.context))
         }
     }
 

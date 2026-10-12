@@ -1645,7 +1645,7 @@ final class PeerInfoScreenNode: ViewControllerTracingNode, PeerInfoScreenNodePro
                     }
                 } else if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController,
                           navigationController.topViewController is PeerInfoScreenImpl {
-                    navigationController.popViewController(animated: true)
+                    _ = navigationController.popViewController(animated: true)
                 }
             case .edit:
                 if case let .replyThread(message) = strongSelf.chatLocation {
